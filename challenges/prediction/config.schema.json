@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "required": ["question"],
+  "properties": {
+    "question": {
+      "type": "string",
+      "title": "Question",
+      "description": "What are players predicting? e.g. \"Who will win the next challenge?\"",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "optionsSource": {
+      "type": "string",
+      "title": "Options",
+      "description": "Predict one of the custom options, or one of the players in the game",
+      "enum": ["custom", "players"],
+      "default": "custom"
+    },
+    "options": {
+      "type": "array",
+      "title": "Custom options",
+      "description": "Used when Options is \"custom\". Needs at least 2; otherwise the players are used instead.",
+      "minItems": 0,
+      "maxItems": 12,
+      "default": [],
+      "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "minimum": 5,
+      "maximum": 600,
+      "default": 20
+    },
+    "points": {
+      "type": "integer",
+      "title": "Points for a correct prediction",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 10
+    },
+    "allowMultipleOutcomes": {
+      "type": "boolean",
+      "title": "Allow several outcomes",
+      "description": "The host may mark several options as correct (ties).",
+      "default": false
+    }
+  }
+}

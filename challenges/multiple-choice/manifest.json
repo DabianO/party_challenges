@@ -1,0 +1,14 @@
+{
+  "id": "multiple-choice",
+  "name": "Multiple Choice",
+  "version": "2.0.0",
+  "apiVersion": "2",
+  "category": "knowledge",
+  "description": "Pick one of up to six options. Correct answers score fixed points with an optional speed bonus.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 30 },
+  "capabilities": ["timer", "multiple-choice", "image", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

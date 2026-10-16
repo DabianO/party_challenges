@@ -1,0 +1,14 @@
+{
+  "name": "@challenge/contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Challenge module contract (SDK types + helpers) and wire protocol for the Modular Challenge Platform",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "required": ["question", "options"],
+  "properties": {
+    "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
+    "options": {
+      "type": "array",
+      "title": "Options",
+      "description": "Between 2 and 8 options, shown as A, B, C, ... in this order.",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+    },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 20 },
+    "points": { "type": "integer", "title": "Points for the winning side", "minimum": 1, "maximum": 1000, "default": 5 },
+    "mode": {
+      "type": "string",
+      "title": "Who scores",
+      "description": "majority: players who voted for the most popular option score. minority: players who voted for the least popular option that received votes score.",
+      "enum": ["majority", "minority"],
+      "default": "majority"
+    },
+    "showLiveCounts": {
+      "type": "boolean",
+      "title": "Show live counts",
+      "description": "Show how many votes each option has on the main display while voting is open (votes stay anonymous).",
+      "default": false
+    }
+  }
+}

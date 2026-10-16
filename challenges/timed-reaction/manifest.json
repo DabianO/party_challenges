@@ -1,0 +1,14 @@
+{
+  "id": "timed-reaction",
+  "name": "Timed Reaction",
+  "version": "2.0.0",
+  "apiVersion": "2",
+  "category": "skill",
+  "description": "After a random delay your screen turns green: tap as fast as you can. Timing is measured on the server.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 20 },
+  "capabilities": ["timer", "real-time-burst", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

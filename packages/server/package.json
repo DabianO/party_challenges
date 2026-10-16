@@ -1,0 +1,20 @@
+{
+  "name": "@challenge/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Game server: REST + WebSocket API, SQLite persistence, media service, static hosting of the web client",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/main.ts --dev",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@challenge/contract": "*",
+    "@challenge/engine": "*",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/static": "^8.2.0",
+    "@fastify/websocket": "^11.1.0",
+    "fastify": "^5.4.0"
+  }
+}

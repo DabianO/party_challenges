@@ -1,0 +1,31 @@
+{
+  "name": "challenge-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Modular Challenge Platform - configurable real-time multiplayer challenge games",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm run dev -w @challenge/server\" \"npm run dev -w @challenge/web\"",
+    "dev:server": "npm run dev -w @challenge/server",
+    "dev:web": "npm run dev -w @challenge/web",
+    "build": "npm run build -w @challenge/web",
+    "start": "npm run start -w @challenge/server",
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/contract && tsc -p packages/engine && tsc -p packages/server && tsc -p packages/web --noEmit && tsc -p challenges/tsconfig.json",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

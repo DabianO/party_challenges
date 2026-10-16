@@ -1,0 +1,20 @@
+{
+  "id": "caption-this",
+  "name": "Caption This",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "description": "Write the best caption for a picture. Another player judges whether it lands.",
+  "players": { "min": 2, "max": null },
+  "duration": { "typicalSeconds": 60 },
+  "capabilities": ["timer", "image", "text-input", "statistics"],
+  "evaluation": {
+    "mode": "peer",
+    "supportedModes": ["peer", "host", "hybrid"],
+    "criteria": "Approve the caption if it fits the picture, is funny or clever, and is not offensive. Reject anything empty, off-topic or mean.",
+    "evidence": { "kind": "text", "field": "caption", "label": "Caption" },
+    "hostScoring": { "min": 0, "max": 10, "step": 1 }
+  },
+  "results": "immediate",
+  "resubmission": "replace"
+}

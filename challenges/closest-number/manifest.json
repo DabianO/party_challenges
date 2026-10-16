@@ -1,0 +1,14 @@
+{
+  "id": "closest-number",
+  "name": "Closest Number",
+  "version": "2.0.0",
+  "apiVersion": "2",
+  "category": "knowledge",
+  "description": "Estimate a number. When the host closes the challenge, the closest guesses score highest.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 45 },
+  "capabilities": ["timer", "numeric-input", "image", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "replace"
+}

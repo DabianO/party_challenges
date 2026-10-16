@@ -1,0 +1,14 @@
+{
+  "id": "prediction",
+  "name": "Prediction",
+  "version": "2.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "description": "Players predict an outcome that is decided later; the host resolves it when it has happened.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 30 },
+  "capabilities": ["multiple-choice", "timer", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "replace"
+}

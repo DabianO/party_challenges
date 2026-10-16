@@ -1,0 +1,14 @@
+{
+  "id": "image-memory",
+  "name": "Image Memory",
+  "version": "2.0.0",
+  "apiVersion": "2",
+  "category": "memory",
+  "description": "Memorise an image for a few seconds, then answer a question about it.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 40 },
+  "capabilities": ["image", "timer", "multiple-choice", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

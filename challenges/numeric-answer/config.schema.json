@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": ["question", "correctAnswer"],
+  "properties": {
+    "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
+    "correctAnswer": { "type": "number", "title": "Correct answer" },
+    "tolerance": {
+      "type": "number",
+      "title": "Tolerance",
+      "description": "Absolute tolerance: answers within plus/minus this amount of the correct value count as correct.",
+      "minimum": 0,
+      "default": 0
+    },
+    "unit": { "type": "string", "title": "Unit", "default": "", "maxLength": 20 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 20 },
+    "points": { "type": "integer", "title": "Points for a correct answer", "minimum": 1, "maximum": 1000, "default": 10 },
+    "media": { "type": "string", "format": "media-ref", "title": "Image (optional)" }
+  }
+}

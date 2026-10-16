@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "required": [
+    "task"
+  ],
+  "properties": {
+    "task": {
+      "type": "string",
+      "title": "Task",
+      "description": "What the photo must show, e.g. \"Take a selfie with someone wearing red\"",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "description": "Per player, from the moment they press Start.",
+      "minimum": 30,
+      "maximum": 900,
+      "default": 180
+    },
+    "points": {
+      "type": "integer",
+      "title": "Points for an approved photo",
+      "description": "Awarded when the judge approves. The host may instead score 0–10 points directly.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 10
+    }
+  }
+}

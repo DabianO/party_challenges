@@ -1,0 +1,220 @@
+/**
+ * Architecture acceptance test (spec §21.3):
+ * "The MVP passes if all modules are implemented without a single change to the core
+ * engine." Every module discovered in /challenges is driven through a complete board game
+ * by the generic engine, using only the public contract — including the peer/host
+ * evaluation pipeline and instance-level host resolution.
+ */
+import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
+import type { GameEvent, GameSnapshot } from '@challenge/contract';
+import { Engine, MemoryRepository, ModuleRegistry, discoverModules, type GameRuntime } from '../src/index.ts';
+import { createFakeTime } from './helpers.ts';
+
+const CHALLENGES_DIR = resolve(import.meta.dirname, '../../../challenges');
+
+const EXPECTED_MODULES = [
+  'caption-this',
+  'closest-number',
+  'image-memory',
+  'majority-vote',
+  'multiple-choice',
+  'numeric-answer',
+  'open-performance',
+  'photo-hunt',
+  'prediction',
+  'timed-reaction',
+];
+
+interface Scenario {
+  configuration: Record<string, unknown>;
+  /** Payload each player submits (index = player index). */
+  inputs: (playerIndex: number) => unknown;
+  /** Milliseconds to advance after Start before submitting (e.g. to pass a reveal phase). */
+  advanceBeforeSubmit?: number;
+  /** Instance-level host resolution payload (onClose modules with hostResolutionView). */
+  resolution?: Record<string, unknown>;
+}
+
+const SCENARIOS: Record<string, Scenario> = {
+  'multiple-choice': {
+    configuration: { question: 'Capital of France?', options: ['Paris', 'Rome', 'Oslo'], correctIndex: 0, timeLimit: 20 },
+    inputs: (i) => ({ answer: i === 0 ? 'A' : 'B' }),
+  },
+  'numeric-answer': {
+    configuration: { question: 'Legs on a spider?', correctAnswer: 8, timeLimit: 20 },
+    inputs: (i) => ({ answer: i === 0 ? 8 : 6 }),
+  },
+  'closest-number': {
+    configuration: { question: 'Golf balls?', correctAnswer: 137, timeLimit: 30 },
+    inputs: (i) => ({ answer: 100 + i * 20 }),
+  },
+  'timed-reaction': {
+    configuration: { minDelaySeconds: 1, maxDelaySeconds: 1, windowSeconds: 4, maxPoints: 10 },
+    advanceBeforeSubmit: 1_500, // past GO
+    inputs: () => ({ tap: true }),
+  },
+  'image-memory': {
+    configuration: { image: 'media://test-image', viewSeconds: 3, question: 'How many cups?', options: ['3', '4', '5'], correctIndex: 1, answerSeconds: 20 },
+    advanceBeforeSubmit: 3_500, // past the hide timer
+    inputs: (i) => ({ answer: i === 0 ? 'B' : 'A' }),
+  },
+  'majority-vote': {
+    configuration: { question: 'Pineapple on pizza?', options: ['Yes', 'No'], timeLimit: 20 },
+    inputs: (i) => ({ answer: i < 2 ? 'A' : 'B' }),
+  },
+  'caption-this': {
+    configuration: { image: 'media://pic', prompt: 'Caption it', timeLimit: 60 },
+    inputs: (i) => ({ caption: `Caption ${i}` }),
+  },
+  'photo-hunt': {
+    configuration: { task: 'Photograph something red', timeLimit: 120 },
+    inputs: (i) => ({ photo: `media://photo${i}` }),
+  },
+  'open-performance': {
+    configuration: { prompt: 'Best pitch for a paperclip', timeLimit: 60 },
+    inputs: (i) => ({ text: `Pitch ${i}` }),
+  },
+  prediction: {
+    configuration: { question: 'Who wins the next round?', optionsSource: 'custom', options: ['Team A', 'Team B'], timeLimit: 20 },
+    inputs: (i) => ({ answer: i === 0 ? 'o0' : 'o1' }),
+    resolution: { outcome: 'o0' },
+  },
+};
+
+async function loadAll() {
+  const registry = new ModuleRegistry();
+  const result = await discoverModules(CHALLENGES_DIR, registry);
+  return { registry, result };
+}
+
+function lastSnapshot(events: GameEvent[], audience: string): GameSnapshot {
+  const e = [...events].reverse().find((ev) => ev.type === 'GAME_STATE_SNAPSHOT' && ev.audience === audience);
+  if (!e) throw new Error(`no snapshot for ${audience}`);
+  return e.payload as GameSnapshot;
+}
+
+describe('architecture acceptance: every module runs on the unmodified engine', () => {
+  it('discovers all modules without load failures', async () => {
+    const { registry, result } = await loadAll();
+    expect(result.failed).toEqual([]);
+    expect(registry.list().map((m) => m.manifest.id).sort()).toEqual(EXPECTED_MODULES);
+    for (const m of registry.list()) {
+      expect(m.manifest.apiVersion).toBe('2');
+      expect(m.manifest.capabilities.length).toBeGreaterThan(0);
+      if (m.manifest.evaluation.mode !== 'automatic') expect(m.manifest.evaluation.criteria).toBeTruthy();
+    }
+  });
+
+  it('plays a full board game with every module; peers and host judge where required', async () => {
+    const { registry } = await loadAll();
+    const time = createFakeTime();
+    const events: GameEvent[] = [];
+    const engine = new Engine({
+      registry,
+      repo: new MemoryRepository(),
+      sink: { emit: (e) => events.push(e), kickPlayer: () => {} },
+      joinUrl: (c) => `http://test/join/${c}`,
+      mediaUrl: (ref) => ref.replace('media://', '/media/'),
+      clock: time.clock,
+      setTimer: time.setTimer,
+      clearTimer: time.clearTimer,
+      random: () => 0,
+    });
+    const { runtime: game } = engine.createGame({ name: 'Acceptance', settings: { judgeDeadlineSeconds: 60 } });
+
+    const ids = registry.list().map((m) => m.manifest.id);
+    const instances = new Map<string, string>();
+    for (const id of ids) {
+      const scenario = SCENARIOS[id];
+      expect(scenario, `missing scenario for ${id}`).toBeDefined();
+      instances.set(id, game.addChallenge(id, scenario!.configuration).id);
+    }
+
+    game.performHostAction({ action: 'open-lobby' });
+    const players = ['Ada', 'Grace', 'Linus'].map((n) => game.join(n).player);
+    game.connect({ role: 'host' });
+    game.connect({ role: 'main' });
+    for (const p of players) game.connect({ role: 'player', playerId: p.id });
+    game.performHostAction({ action: 'start-game' });
+
+    for (const id of ids) {
+      const instId = instances.get(id)!;
+      const inst = game.getInstance(instId);
+      const manifest = registry.get(inst.moduleId, inst.moduleVersion)!.manifest;
+      expect(inst.phase, `${id} should be open`).toBe('ACTIVE');
+
+      // Every player plays at a different moment.
+      for (let i = 0; i < players.length; i++) {
+        const p = players[i]!;
+        expect(game.startAttempt(p.id, instId), `${id}: start for player ${i}`).toEqual({ ok: true });
+        expect(inst.error, `${id}: start error ${inst.error}`).toBeNull();
+        const entry = lastSnapshot(events, `player:${p.id}`).board.find((b) => b.instanceId === instId)!;
+        expect(entry.status).toBe('in_progress');
+        expect(entry.view, `${id}: guest view`).not.toBeNull();
+        if (SCENARIOS[id]!.advanceBeforeSubmit) time.advance(SCENARIOS[id]!.advanceBeforeSubmit!);
+        const res = game.submit(p.id, instId, SCENARIOS[id]!.inputs(i));
+        expect(res, `${id}: submission by player ${i}: ${JSON.stringify(res)}`).toEqual({ ok: true });
+        if (manifest.resubmission === 'replace') expect(game.finishAttempt(p.id, instId)).toEqual({ ok: true });
+        expect(inst.error, `${id}: error after submit ${inst.error}`).toBeNull();
+        time.advance(5_000);
+      }
+      // Main display never sees module data beyond public stats.
+      const main = lastSnapshot(events, 'main');
+      expect(main.challenges.find((c) => c.id === instId)!.stats.submitted).toBe(3);
+      expect(JSON.stringify(main)).not.toContain('"judging"' + ':[{');
+
+      // Peer / host modes: work through the judging tasks and host queue.
+      const mode = game.effectiveMode(inst);
+      if (mode === 'peer' || mode === 'hybrid') {
+        for (let round = 0; round < 3; round++) {
+          for (const p of players) {
+            for (const task of lastSnapshot(events, `player:${p.id}`).judging.filter((t) => t.instanceId === instId)) {
+              expect(JSON.stringify(task.presentation)).not.toContain(p.displayName); // never your own
+              expect(game.judge(p.id, task.assignmentId, 'approve')).toEqual({ ok: true });
+            }
+          }
+        }
+      }
+      for (const item of lastSnapshot(events, 'host').hostQueue.filter((q) => q.instanceId === instId)) {
+        game.performHostAction({ action: 'decide', assignmentId: item.assignmentId, decision: 'approve', points: manifest.evaluation.hostScoring ? 8 : undefined });
+      }
+
+      game.performHostAction({ action: 'close-challenge', instanceId: instId });
+      expect(inst.error, `${id}: close error ${inst.error}`).toBeNull();
+      if (inst.phase === 'EVALUATING') {
+        const form = lastSnapshot(events, 'host').resolutions.find((r) => r.instanceId === instId);
+        expect(form?.form?.ui, `${id}: resolution form`).toBeDefined();
+        game.performHostAction({ action: 'resolve', instanceId: instId, payload: {} });
+        expect(inst.phase).toBe('EVALUATING'); // empty payload must not complete
+        game.performHostAction({ action: 'resolve', instanceId: instId, payload: SCENARIOS[id]!.resolution! });
+      }
+      expect(inst.phase, `${id}: expected RESULTS`).toBe('RESULTS');
+      expect(lastSnapshot(events, 'host').hostQueue.filter((q) => q.instanceId === instId)).toEqual([]);
+
+      const host = lastSnapshot(events, 'host');
+      const results = host.results[instId]!;
+      expect(results, `${id}: results`).toBeDefined();
+      expect(results.generic.submissions).toBe(3);
+      expect(results.statistics).toBeTypeOf('object');
+      for (const p of players) {
+        const entry = lastSnapshot(events, `player:${p.id}`).board.find((b) => b.instanceId === instId)!;
+        expect(entry.status, `${id}: ${p.displayName} status`).toBe('scored');
+        expect(entry.result, `${id}: ${p.displayName} personal result`).not.toBeNull();
+      }
+      const stats = host.challenges.find((c) => c.id === instId)!.stats;
+      expect(stats).toMatchObject({ started: 3, submitted: 3, scored: 3, pendingEvaluations: 0 });
+    }
+
+    game.performHostAction({ action: 'end-game' });
+    const final = game.snapshotFor({ role: 'host' });
+    expect(game.status).toBe('GAME_RESULTS');
+    expect(final.leaderboard).toHaveLength(3);
+    expect(final.leaderboard[0]!.total).toBeGreaterThan(0);
+    expect(final.leaderboard[0]!.completed).toBe(ids.length);
+    expect(final.challenges.every((c) => c.phase === 'RESULTS')).toBe(true);
+    expect(events.some((e) => e.type === 'MODULE_ERROR')).toBe(false);
+  });
+});
+
+export type { GameRuntime };

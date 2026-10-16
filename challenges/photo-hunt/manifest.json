@@ -1,0 +1,20 @@
+{
+  "id": "photo-hunt",
+  "name": "Photo Hunt",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "chaos",
+  "description": "Race to take a photo that matches the task. Another player checks that it really shows what was asked.",
+  "players": { "min": 2, "max": null },
+  "duration": { "typicalSeconds": 180 },
+  "capabilities": ["camera", "evidence-upload", "image", "timer", "statistics"],
+  "evaluation": {
+    "mode": "peer",
+    "supportedModes": ["peer", "host", "hybrid"],
+    "criteria": "Approve if the photo clearly shows what the task asked for and was obviously taken just now at the party.",
+    "evidence": { "kind": "image", "field": "photo", "label": "Photo" },
+    "hostScoring": { "min": 0, "max": 10, "step": 1 }
+  },
+  "results": "immediate",
+  "resubmission": "none"
+}

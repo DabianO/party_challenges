@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "required": ["image", "question", "options", "correctIndex"],
+  "properties": {
+    "image": {
+      "type": "string",
+      "format": "media-ref",
+      "title": "Image to memorise",
+      "description": "Shown to everyone for a few seconds, then hidden."
+    },
+    "viewSeconds": {
+      "type": "integer",
+      "title": "Viewing time (seconds)",
+      "description": "How long the image stays visible before the question appears.",
+      "minimum": 3,
+      "maximum": 120,
+      "default": 10
+    },
+    "question": {
+      "type": "string",
+      "title": "Question",
+      "description": "Asked after the image is hidden, e.g. \"How many red cups were on the table?\"",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "options": {
+      "type": "array",
+      "title": "Answer options",
+      "description": "Between 2 and 6 options; shown lettered A, B, C…",
+      "minItems": 2,
+      "maxItems": 6,
+      "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+    },
+    "correctIndex": {
+      "type": "integer",
+      "title": "Correct option (position)",
+      "description": "0 for the first option, 1 for the second, and so on.",
+      "minimum": 0
+    },
+    "answerSeconds": {
+      "type": "integer",
+      "title": "Answer time (seconds)",
+      "minimum": 5,
+      "maximum": 300,
+      "default": 20
+    },
+    "points": {
+      "type": "integer",
+      "title": "Points for a correct answer",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 10
+    }
+  }
+}

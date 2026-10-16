@@ -1,0 +1,20 @@
+{
+  "name": "@challenge/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Core engine: games, players, lifecycle, submission routing, score ledger, leaderboard, timers, module runtime",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run --root ../.."
+  },
+  "dependencies": {
+    "@challenge/contract": "*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

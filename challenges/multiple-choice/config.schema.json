@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "required": ["question", "options", "correctIndex"],
+  "properties": {
+    "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
+    "options": {
+      "type": "array",
+      "title": "Answer options",
+      "description": "Between 2 and 6 options. They are shown as A, B, C, ... in this order.",
+      "minItems": 2,
+      "maxItems": 6,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+    },
+    "correctIndex": {
+      "type": "integer",
+      "title": "Correct option",
+      "description": "Zero-based index into the options list (0 = A, 1 = B, ...).",
+      "minimum": 0
+    },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 20 },
+    "points": { "type": "integer", "title": "Points for a correct answer", "minimum": 1, "maximum": 1000, "default": 10 },
+    "speedBonus": {
+      "type": "boolean",
+      "title": "Speed bonus",
+      "description": "Correct answers earn up to 50% extra, scaled by how quickly they were given within the time limit.",
+      "default": true
+    },
+    "media": { "type": "string", "format": "media-ref", "title": "Image (optional)" }
+  }
+}

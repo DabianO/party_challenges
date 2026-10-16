@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "properties": {
+    "minDelaySeconds": {
+      "type": "number",
+      "title": "Minimum delay (seconds)",
+      "description": "Shortest wait before the screen turns green.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 2
+    },
+    "maxDelaySeconds": {
+      "type": "number",
+      "title": "Maximum delay (seconds)",
+      "description": "Longest wait before the screen turns green.",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 6
+    },
+    "windowSeconds": {
+      "type": "integer",
+      "title": "Tap window (seconds)",
+      "description": "How long after GO players may still tap.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 4
+    },
+    "maxPoints": { "type": "integer", "title": "Points for the fastest tap", "minimum": 1, "maximum": 1000, "default": 10 },
+    "falseStartPenalty": {
+      "type": "integer",
+      "title": "False start penalty",
+      "description": "Points subtracted for tapping before GO. Recorded as a negative score for this challenge; 0 disables the penalty.",
+      "minimum": 0,
+      "default": 0
+    }
+  }
+}

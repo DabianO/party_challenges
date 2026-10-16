@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": ["question", "correctAnswer", "timeLimit"],
+  "properties": {
+    "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
+    "correctAnswer": { "type": "number", "title": "Correct answer" },
+    "unit": { "type": "string", "title": "Unit", "default": "", "maxLength": 20 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 30 },
+    "maxPoints": { "type": "integer", "title": "Maximum points", "minimum": 1, "maximum": 1000, "default": 10 },
+    "scoring": {
+      "type": "string",
+      "title": "Scoring",
+      "description": "ranked: 1st closest gets max points, then decreasing. distance: points shrink with relative distance.",
+      "enum": ["ranked", "distance"],
+      "default": "ranked"
+    },
+    "media": { "type": "string", "format": "media-ref", "title": "Image (optional)" }
+  }
+}

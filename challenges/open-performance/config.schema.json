@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "required": ["prompt"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "title": "Prompt",
+      "description": "The task, e.g. \"Give your best 30-second sales pitch for a paperclip\"",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "instructions": {
+      "type": "string",
+      "title": "Extra instructions",
+      "description": "Optional rules or hints shown under the prompt.",
+      "default": "",
+      "maxLength": 500
+    },
+    "textLabel": {
+      "type": "string",
+      "title": "Text field label",
+      "description": "Label of the short entry (title or one-liner) players type before performing.",
+      "default": "Your entry",
+      "maxLength": 60
+    },
+    "maxLength": {
+      "type": "integer",
+      "title": "Maximum entry length",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 140
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "description": "Per player, from the moment they press Start.",
+      "minimum": 10,
+      "maximum": 900,
+      "default": 90
+    },
+    "points": {
+      "type": "integer",
+      "title": "Points for an approved entry",
+      "description": "Awarded when the judge approves without entering a score. The host may instead score 0–10 points directly.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 10
+    }
+  }
+}
