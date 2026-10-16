@@ -1,12 +1,12 @@
 # Modular Challenge Platform
 
-## Software Specification — v0.2
+## Software Specification — v0.3
 
 | | |
 |---|---|
 | **Status** | Draft |
-| **Version** | 0.2 |
-| **Supersedes** | v0.1 |
+| **Version** | 0.3 |
+| **Supersedes** | v0.2 |
 | **Audience** | Product owner, architects, developers |
 
 ---
@@ -70,6 +70,9 @@ Keywords **must**, **should**, and **may** are used in the RFC 2119 sense.
 | **Challenge Library** | The catalog of installed challenge modules available to hosts. |
 | **Capability** | A platform feature a module declares it needs (timer, media, camera, manual evaluation, …). |
 | **Manifest** | A module's machine-readable metadata: id, version, capabilities, configuration schema reference. |
+| **Evaluation Mode** | How a challenge's results are decided: `automatic`, `peer`, `host`, or `hybrid` (§14). |
+| **Judge** | A participant (peer mode) or the host (host mode) who approves/rejects a submission. |
+| **Evaluation Assignment** | An engine-managed task pairing one judge with one submission, with a deadline. |
 
 ---
 
@@ -99,7 +102,7 @@ Used by the game host on their own device (phone, tablet, or laptop), separate f
 - **FR-3** — The host **must** see live participant status per challenge: joined, submitted, waiting, disconnected.
 - **FR-4** — The host **must** be able to remove a player from the game.
 - **FR-5** — The host **should** be able to pause the game, replay/restart a challenge (where the module permits it), and skip a challenge.
-- **FR-6** — The host **must** be able to enter manual scores when a module requires manual evaluation (§14).
+- **FR-6** — The host **must** be able to act as evaluator when a module's evaluation mode requires it, and to override any evaluation outcome (§14).
 - **FR-7** — Host actions **must** require authentication and be authorized against the specific game (see SR-6).
 
 ### 3.2 Main Display
@@ -204,11 +207,11 @@ Each challenge instance runs through its own lifecycle inside the game's challen
 | `INTRO` | Instructions shown, input closed | Host starts, or auto after N seconds |
 | `ACTIVE` | Guests can submit | Timer expiry or host lock |
 | `LOCKED` | Input closed, no submissions accepted | Automatic |
-| `EVALUATING` | Module evaluates; manual scoring happens here | Evaluation complete |
+| `EVALUATING` | Evaluation runs: automatic, peer approval, and/or host queue (§14) | All evaluations resolved |
 | `RESULTS` | Challenge results shown; leaderboard updated | Host advances |
 | `DONE` | Finished; immutable | — |
 
-- **FR-20** — Not every module needs every state: a module declares in its manifest which optional states it uses (`INTRO`, `EVALUATING` for manual scoring). The engine **must** skip undeclared optional states.
+- **FR-20** — Not every module needs every state: a module declares in its manifest which optional states it uses (`INTRO`; `EVALUATING` is implied for any non-automatic evaluation mode, §14). The engine **must** skip undeclared optional states.
 - **FR-21** — The transition `ACTIVE → LOCKED` **must** be enforced server-side. Submissions arriving after lock **must** be rejected regardless of client-side timers (see SR-4).
 - **FR-22** — Timers **must** run on the server clock; clients receive the authoritative end timestamp and render countdowns locally.
 
@@ -273,7 +276,7 @@ A module is a self-contained package:
   "duration": { "typicalSeconds": 45 },
   "lifecycle": { "usesIntro": true, "usesEvaluating": false },
   "capabilities": ["timer", "numeric-input", "statistics"],
-  "evaluation": "automatic"
+  "evaluation": "automatic"   // "automatic" | "peer" | "host" | "hybrid" (§14)
 }
 ```
 
@@ -396,7 +399,9 @@ Modules declare capabilities so the platform knows what they require and can gat
 timer            image            video            audio
 text-input       numeric-input    multiple-choice  drawing
 camera           microphone       real-time-burst  anonymous
-manual-evaluation  automatic-evaluation  media-upload
+evidence-upload    media-upload
+
+Evaluation *mode* is declared separately in the manifest (§14, MR-17), not as a capability.
 ```
 
 - **MR-14** — Using an undeclared capability is a contract violation; the module loader **should** enforce this where technically possible (sandboxing).
@@ -463,7 +468,8 @@ GAME_STATE_SNAPSHOT     PLAYER_JOINED          CHALLENGE_STARTED
 GAME_STARTED            PLAYER_DISCONNECTED    CHALLENGE_PHASE_CHANGED
 GAME_FINISHED           PLAYER_RECONNECTED     CHALLENGE_LOCKED
 LEADERBOARD_UPDATED     PLAYER_REMOVED         RESULTS_AVAILABLE
-                        PLAYER_SUBMITTED       MODULE_EVENT (opaque)
+EVALUATION_ASSIGNED     PLAYER_SUBMITTED       MODULE_EVENT (opaque)
+EVALUATION_DECIDED      EVALUATION_ESCALATED
 ```
 
 - **FR-37** — Events **must** carry a per-game sequence number so clients can detect gaps and request resync.
@@ -519,7 +525,12 @@ ChallengeInstance
 
 Submission
   id, challenge_instance_id, player_id,
-  payload(json), submitted_at(server), superseded_by?
+  payload(json), evidence_media_id?, submitted_at(server), superseded_by?
+
+EvaluationAssignment
+  id, challenge_instance_id, submission_id, judge_player_id,
+  status(pending|approved|rejected|expired|escalated|overridden),
+  assigned_at, deadline_at, decided_at?, decided_by(peer|host), note?
 
 ScoreAward
   id, game_id, challenge_instance_id?, player_id,
@@ -545,13 +556,83 @@ MediaAsset
 
 ---
 
-## 14. Manual Evaluation
+## 14. Evaluation Modes
 
-For challenges that cannot be auto-evaluated ("Give your best 30-second sales pitch"):
+Not every challenge can be judged by the machine. Evaluation is therefore a **generic engine capability** with four modes. A module never implements judging pipelines itself — it only declares which mode it uses:
 
-- **FR-53** — A module with `evaluation: "manual"` (or "hybrid") pauses in `EVALUATING` and requests host input.
-- **FR-54** — The host interface **must** render a scoring form (per player: points within the module's declared range, optional note); on submit, scores flow into the ledger exactly like automatic scores.
-- **FR-55** — Hybrid mode **must** be supported: the module pre-computes what it can and asks the host only for the judgment call.
+```text
+Challenge
+├── Player interaction
+├── Submission (+ optional evidence)
+├── Evaluation mode
+│   ├── automatic      — engine asks the module's evaluate()
+│   ├── peer           — engine runs the peer-approval pipeline
+│   ├── host           — engine queues submissions for the host
+│   └── hybrid         — peer approval first, host can override
+├── Scoring
+└── Results
+```
+
+- **MR-17** — Every module **must** declare its evaluation mode in the manifest: `"evaluation": "automatic" | "peer" | "host" | "hybrid"`. Modules using `peer`, `host`, or `hybrid` **must** additionally provide human-readable **evaluation criteria** (what a judge should check) and declare what evidence, if any, a submission carries (§14.6).
+- **MR-18** — Modules **must not** implement judge assignment, approval queues, deadlines, or escalation. These belong to the engine, so Caption This, Common Ground, Dabian Trivia, and any future subjective challenge all reuse the same mechanism.
+
+### 14.1 Automatic
+
+The module's `evaluate()` determines the result with no human input. Examples: reaction time, multiple choice, numeric answer, cup-stack timer.
+
+- **FR-53** — In `automatic` mode the engine **must** run the standard pipeline of §7.6 unchanged.
+
+### 14.2 Peer Approval
+
+Each participant's submission is judged by another randomly assigned participant, who sees the submission (plus evidence) and the module's evaluation criteria, then approves or rejects it.
+
+```text
+Submit → engine assigns random judge → judge notified on their phone
+      → judge sees evidence + criteria → approve / reject
+      → (timeout ⇒ reassign / escalate) → module maps decisions to results
+      → calculateScores → ledger
+```
+
+- **FR-54** — The engine **must** implement peer approval as a reusable pipeline available to any module that declares it. The judging UI is a generic engine screen fed by the module's criteria and evidence — not a module UI component.
+- **FR-62** — **Assignment rules.** The engine **must**: never assign a player to judge their own submission; re-randomize assignments for every challenge (never a sticky pairing across the game); and avoid reciprocal pairs (A judges B while B judges A) unless the player count makes this unavoidable (e.g., 2 players).
+- **FR-63** — **Hidden assignments.** Judges **must not** be publicly revealed — neither on the main display nor to the judged player — so participants cannot coordinate approvals. Assignment events are scoped `player:<judgeId>` only (FR-38 applies).
+- **FR-64** — **Approval deadline.** Each assignment carries a deadline (default 60 s, configurable per game and overridable per module). On expiry the engine **must** automatically reassign to another eligible judge; if no eligible judge remains (or after a configurable number of reassignments), the assignment **must** escalate to the host queue.
+- **FR-65** — A judge's decision is `approve` or `reject`, with an optional short note. The engine records the decision and hands the set of decisions to the module (as part of the `Evaluation` input) so the module maps them to results/points however it likes (pass/fail, per-approval points, etc.).
+- **FR-66** — Players **must** be able to act as judge and submitter concurrently; the guest UI queues judging tasks alongside (or after) the player's own submission flow.
+
+### 14.3 Host Approval
+
+The host receives a queue of submissions and approves/rejects (or scores) each one. Useful for subjective challenges or when the host wants full control.
+
+- **FR-67** — In `host` mode the engine **must** present the host a live queue: submission, evidence, criteria, per-item approve/reject or a points input within the module's declared range, plus an optional note. Decisions flow into the ledger exactly like automatic scores.
+
+### 14.4 Hybrid
+
+Peer approval runs first; the host supervises and can override. This is the recommended default for subjective challenges.
+
+- **FR-68** — In `hybrid` mode, disputed, rejected, expired, or flagged assignments **must** surface in the host queue; everything else resolves via peers without host effort.
+
+### 14.5 Host Override (all modes)
+
+- **FR-55** — Regardless of mode, the host **must** be able to: view all pending and completed evaluations, approve/reject anything (overruling a peer decision), and manually change any result or score before or after `RESULTS`. Overrides are written to the ledger with `source: manual` and a reason (FR-43 applies).
+
+### 14.6 Evidence
+
+- **FR-69** — Where a module declares it, a submission **may** include evidence — photo, video, audio, number, or text — uploaded through the media service (§15) and referenced from the submission payload. The judging UI (peer or host) **must** display the evidence next to the module's evaluation criteria.
+
+### 14.7 Game-Level Evaluation Preference
+
+- **FR-70** — The host **may** set a game-level evaluation preference that constrains or remaps module defaults where the module supports multiple modes:
+
+```text
+Who evaluates challenges?
+ ○ Automatic where possible
+ ● Random players (peer approval)
+ ○ Host
+ ○ Automatic + random players + host override (hybrid)
+```
+
+This balance lets a host run a whole evening without judging every submission personally, while retaining the ability to step in when something goes wrong. Modules that support only one mode (e.g., a reaction test is inherently automatic) ignore the preference; the configuration UI **must** make this visible.
 
 ---
 
@@ -576,6 +657,7 @@ For challenges that cannot be auto-evaluated ("Give your best 30-second sales pi
 - **SR-8** — Uploaded media **must** be validated and served from a domain/path that cannot execute in the application origin.
 - **SR-9** — Guest input rendered anywhere (names, text answers) **must** be treated as untrusted and output-encoded (XSS).
 - **SR-10** — If third-party modules are ever installed (post-v1), module server code **must** run sandboxed with no direct filesystem, network, or database access (MR-3 enforced technically, not just by convention).
+- **SR-11** — Peer-approval integrity: a judge **must** only ever receive the specific submission assigned to them; assignments **must** be concealed from everyone except the judge and the host (FR-63); and judge decisions **must** be accepted only from the assigned judge's authenticated session, only while the assignment is `pending` and before its deadline.
 
 ---
 
@@ -639,7 +721,7 @@ The fundamental abstraction must never collapse to "question → answer → poin
 - Real-time state to host, main display, and guests (FR-35–38)
 - Submission pipeline with server-side validation and locking (§7.6, SR-1–4)
 - Score ledger, live leaderboard, game results (FR-40–42)
-- Manual evaluation flow (FR-53–54)
+- Evaluation modes: automatic + peer approval pipeline + host queue + override (§14)
 - Basic media upload for configuration (FR-56, FR-58)
 
 ### 21.2 Initial Challenge Modules
@@ -654,7 +736,8 @@ Chosen deliberately to stress different corners of the contract:
 | 4 | Timed Reaction | server-side timing (SR-5), time-based scoring |
 | 5 | Image / Memory | media capability, timed reveal phases |
 | 6 | Majority Vote | no "correct" answer, social scoring |
-| 7 | Open Performance | manual evaluation (§14) |
+| 6b | Caption This | **peer approval** (§14.2), text submission + evidence display |
+| 7 | Open Performance | **host approval** queue, optional **hybrid** override (§14.3–14.4) |
 | 8 | Prediction | deferred evaluation (scored after a later event) |
 
 ### 21.3 Architecture Acceptance Test
@@ -676,8 +759,9 @@ Accounts for guests, templates/sharing, marketplace, analytics dashboards, custo
 3. **Transport & stack** — WebSockets vs. managed real-time service; monolith vs. split game-server; persistence choice.
 4. **Reaction-timing protocol** — how precise can server-authoritative timing be over party networks, and what fairness compensation (per-player latency estimation) is needed (SR-5)?
 5. **Late-join semantics per module** — engine default (FR-18) vs. module opt-in hooks for mid-challenge joins.
-6. **State snapshot size** — full snapshot on reconnect (FR-36) vs. snapshot + event replay for media-heavy challenges.
+6. **Peer-approval fairness** — how to weight or audit peer decisions (a rejected player judging their rival?), whether judges earn small points for judging promptly, and derangement algorithm choice for assignments (FR-62) at small player counts.
+7. **State snapshot size** — full snapshot on reconnect (FR-36) vs. snapshot + event replay for media-heavy challenges.
 
 ---
 
-*End of specification v0.2.*
+*End of specification v0.3.*
