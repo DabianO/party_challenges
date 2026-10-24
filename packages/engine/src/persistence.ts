@@ -7,7 +7,9 @@ import type {
   EvaluationMode,
   GameSettings,
   GameStatus,
+  PublishedStandings,
   ScoreLedgerEntry,
+  StandingsFeedItem,
 } from '@challenge/contract';
 
 /**
@@ -30,6 +32,8 @@ export interface PersistedSubmission {
   id: string;
   challengeInstanceId: string;
   playerId: string;
+  /** The attempt this submission belongs to (a player may have several with replays). */
+  attemptId: string;
   payload: unknown;
   submittedAt: number;
   supersededBy: string | null;
@@ -41,7 +45,7 @@ export interface PersistedSubmission {
 
 export type AttemptStatus = 'in_progress' | 'locked' | 'scored';
 
-/** One player's run of one challenge instance. */
+/** One player's run of one challenge instance (several per player when replays are allowed). */
 export interface PersistedAttempt {
   id: string;
   challengeInstanceId: string;
@@ -88,6 +92,12 @@ export interface PersistedInstance {
   moduleId: string;
   moduleVersion: string;
   sortOrder: number;
+  /** Host-entered title shown to players ('' = module name). */
+  title: string;
+  /** Host-entered category; players' boards group by it ('' = none). */
+  category: string;
+  /** Players may start new attempts; only their best one counts. */
+  allowReplay: boolean;
   configuration: Record<string, unknown>;
   moduleState: unknown;
   phase: ChallengePhase;
@@ -122,6 +132,12 @@ export interface PersistedGame {
   startedAt: number | null;
   finishedAt: number | null;
   paused: boolean;
+  /** Host revealed points and results to players and the main display. */
+  resultsRevealed: boolean;
+  /** Standings as last published to the big screen (null before the first update). */
+  standings: PublishedStandings | null;
+  /** Ranking changes between publications, oldest first (capped). */
+  standingsFeed: StandingsFeedItem[];
   seq: number;
   players: PersistedPlayer[];
   instances: PersistedInstance[];

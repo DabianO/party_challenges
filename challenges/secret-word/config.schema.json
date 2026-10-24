@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "properties": {
+    "maxPoints": {
+      "type": "integer",
+      "title": "Maximum points",
+      "description": "Together with the points per word this sets how many words each player gets (10 ÷ 2 = 5 words).",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    },
+    "pointsPerWord": {
+      "type": "integer",
+      "title": "Points per word",
+      "description": "Earned for every word a player slipped into a conversation unnoticed.",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 1
+    },
+    "customWords": {
+      "type": "string",
+      "title": "Your own words (optional)",
+      "description": "One per line or separated by commas. Replaces the built-in list of about 1,400 English words. Make it at least players × words long, or some players will share words.",
+      "maxLength": 20000
+    }
+  }
+}

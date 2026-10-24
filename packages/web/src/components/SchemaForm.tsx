@@ -139,11 +139,13 @@ export interface SchemaFormProps {
   serverError?: string | null;
   /** Uploads a file and resolves to its `media://` ref. Required for `media-ref` fields. */
   upload?: (file: File) => Promise<string>;
+  /** Fields rendered before the schema fields, inside the same form (e.g. the challenge title). */
+  leading?: ReactNode;
   /** Extra fields rendered after the schema fields, inside the same form (e.g. instance options). */
   extra?: ReactNode;
 }
 
-export function SchemaForm({ schema, initialValue, onSubmit, onCancel, submitLabel = 'Save', busy = false, serverError, upload, extra }: SchemaFormProps) {
+export function SchemaForm({ schema, initialValue, onSubmit, onCancel, submitLabel = 'Save', busy = false, serverError, upload, leading, extra }: SchemaFormProps) {
   const root = useMemo(() => normaliseProp(schema), [schema]);
   const [value, setValue] = useState<Record<string, unknown>>(() => ({ ...defaultsFor(root), ...(initialValue ?? {}) }));
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -176,6 +178,7 @@ export function SchemaForm({ schema, initialValue, onSubmit, onCancel, submitLab
 
   return (
     <form className="schema-form" onSubmit={handleSubmit} noValidate>
+      {leading}
       {props.length === 0 && <p className="muted">This challenge needs no configuration.</p>}
       {props.map(([name, prop]) => (
         <Field key={name} name={name} prop={prop} required={required.has(name)} value={value[name]} error={errors[name]} onChange={(v) => update(name, v)} upload={upload} />

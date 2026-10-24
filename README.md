@@ -37,7 +37,22 @@ LAN address so phones on the same Wi-Fi can reach it) or go to `/join/<CODE>`, t
 challenges from their board. Peer-judged challenges send judging tasks to other guests'
 phones; host-judged ones appear in your Run tab.
 
-To try everything quickly, seed a demo game containing all ten modules while `npm run dev`
+Results stay hidden from guests while the game runs: guests only see which challenges they
+finished. Press **Reveal results** in the Run tab when it is time. The big screen shows the
+points race (graph + overtakes) as of the last time you pressed **Update the big screen**.
+
+**Saving and backups.** Everything is saved automatically to `data/platform.sqlite` and
+survives restarts. On the machine running the server, `/host` lists every stored game,
+even in a browser that never opened it (another port or address). For an extra backup,
+download the setup from a game's Setup tab (*Download setup (.json)*: challenges, titles,
+settings, branding and images) and restore it with *Import a setup file* on the Host page.
+
+**Starting over.** *New game with this setup* (Setup tab, and Run tab once a game has
+ended) creates a clean copy (new code, no players or scores), e.g. to go from a test run
+to the real party. The old game is kept; *Continue this game* brings an ended or closed
+game back to in progress with everyone's points.
+
+To try everything quickly, seed a demo game containing all fifteen modules while `npm run dev`
 is running. It prints the host, display and join URLs:
 
 ```bash
@@ -57,7 +72,9 @@ npm start
 |---|---|---|
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | Game server bind address |
 | `PUBLIC_URL` | `http://<lan-ip>:<port>` | Base URL encoded in join links / QR codes |
-| `DATA_DIR` | `./data` | SQLite database + uploaded media |
+| `DATA_DIR` | `./data` | SQLite database, uploaded media and the server's `host-key` |
+| `LOCAL_HOST_ACCESS` | `1` | `0` stops listing stored games (with host tokens) to browsers on the host machine; set it when a reverse proxy on this machine forwards outside traffic without `X-Forwarded-For` |
+| `API_PORT` | `3000` | (Vite dev server) game server port the dev proxy forwards to |
 | `CHALLENGES_DIR` | `./challenges` | Module discovery directory |
 | `MEDIA_MAX_BYTES` | `10485760` | Upload size limit |
 | `MEDIA_BASE_URL` | *(same origin)* | Serve media from a separate origin (SR-8 hardening) |
@@ -84,14 +101,19 @@ docs/                                    Architecture and module-authoring docum
 | `numeric-answer` | knowledge | immediate | automatic | exact-match evaluation with tolerance |
 | `closest-number` | knowledge | on close | automatic | aggregate ranked scoring (reference module) |
 | `timed-reaction` | skill | immediate | automatic | server-side per-player timing (SR-5) |
+| `stop-the-clock` | skill | immediate | automatic | phone-timed stopwatch (`ui.stopwatch`), checked against the server's own measurement |
 | `image-memory` | memory | immediate | automatic | media, per-player reveal/hide phases |
 | `majority-vote` | social | on close | automatic | no correct answer, social scoring |
 | `caption-this` | social | immediate | peer (host, hybrid) | peer approval with text evidence (reference module) |
 | `photo-hunt` | chaos | immediate | peer (host, hybrid) | evidence upload from the phone camera |
 | `open-performance` | chaos | immediate | host (hybrid, peer) | host queue with points |
 | `prediction` | social | on close | automatic + host resolution | outcome resolved later by the host |
+| `multi-answer` | knowledge | immediate | automatic | several answers, a share of the points each, the remainder only for a full set |
+| `blob-war` | chaos | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle) |
+| `group-message` | social | immediate | automatic | one player at a time (`canStart`), repeated attempts whose points add up (`attempts: "repeat"`) |
+| `secret-word` | social | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400 (or the host's own), left open while the player waits for the right moment |
 
-All ten run on the same engine without engine changes (spec §21.3). Add your own by
+All fifteen run on the same engine without engine changes (spec §21.3). Add your own by
 creating a folder under `challenges/` — see the authoring guide.
 
 ## Scripts

@@ -87,7 +87,9 @@ export default defineModule<Config, State, Input, Evaluation>({
   onAttemptStart(state, player, ctx) {
     // Show the image first; the question (and this player's lock timer) follow once it is hidden.
     ctx.schedule('hide', state.config.viewSeconds, player.id);
-    return { ...state, stage: { ...state.stage, [player.id]: 'view' } };
+    // A replay starts over: image first, no answer yet.
+    const { [player.id]: _previous, ...answers } = state.answers;
+    return { ...state, stage: { ...state.stage, [player.id]: 'view' }, answers };
   },
 
   onTimer(state, tag, ctx, playerId) {

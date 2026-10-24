@@ -29,7 +29,7 @@ export function AttentionPanel({ ctx }: { ctx: HostCtx }) {
       </h2>
       {count === 0 && <p className="muted">Nothing waiting for you. Judged submissions and closed challenges that need a decision show up here.</p>}
       {resolutions.map((r) => (
-        <ResolutionCard key={r.instanceId} ctx={ctx} instanceId={r.instanceId} moduleName={r.moduleName} form={r.form} />
+        <ResolutionCard key={r.instanceId} ctx={ctx} instanceId={r.instanceId} moduleName={r.title} form={r.form} />
       ))}
       {hostQueue.map((item) => (
         <QueueCard key={item.assignmentId} ctx={ctx} item={item} />
@@ -87,7 +87,7 @@ function QueueCard({ ctx, item }: { ctx: HostCtx; item: HostQueueItem }) {
     <article className="card card-flat stack gap-md queue-item" aria-label={`Submission by ${item.displayName}`}>
       <div className="row gap-sm wrap align-center">
         <strong className="grow">
-          {item.displayName} <span className="muted">· {item.moduleName}</span>
+          {item.displayName} <span className="muted">· {item.title}</span>
         </strong>
         <span className={`badge ${reason.tone}`}>{reason.label}</span>
         <span className="muted small mono">{formatClock(item.submittedAt)}</span>

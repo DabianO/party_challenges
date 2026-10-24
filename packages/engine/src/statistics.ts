@@ -14,11 +14,11 @@ export function computeGenericStatistics(input: {
   const latest = input.submissions.filter((s) => !s.supersededBy);
   const submitters = new Set(latest.map((s) => s.playerId));
   const participants = input.participantIds.length;
-  const startedAt = new Map(input.attempts.map((a) => [a.playerId, a.startedAt] as const));
+  const startedAt = new Map(input.attempts.map((a) => [a.id, a.startedAt] as const));
 
   const times = latest
     .map((s) => {
-      const start = startedAt.get(s.playerId);
+      const start = startedAt.get(s.attemptId);
       return start == null ? null : Math.max(0, (s.submittedAt - start) / 1000);
     })
     .filter((t): t is number => t !== null)

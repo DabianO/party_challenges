@@ -1,0 +1,15 @@
+{
+  "id": "secret-word",
+  "name": "Secret Word",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "description": "Get a secret word and slip it into a conversation without the other person noticing. Then say honestly whether it worked, and get your next word.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 600 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none",
+  "attempts": "repeat"
+}

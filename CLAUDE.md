@@ -57,8 +57,23 @@ TypeScript runs directly via `tsx` (no build step for backend packages). Imports
   (host closed it) → [`EVALUATING`, host resolution for onClose modules] → `RESULTS`.
 - **Availability:** `open` (opens at game start), `host-unlocked` (hidden until the host unlocks),
   `assigned` (only listed players see it).
-- **Attempts:** one per player per instance. Start → input → locked (submit with
-  `resubmission: none`, `lock` timer, Finish, or instance closed) → evaluated → scored.
+- **Attempts:** one per player per instance, unless the instance has `allowReplay`
+  (immediate-results modules only): then players start new attempts and only their best
+  counts (a `[best:<player>]` ledger adjustment, `settleBestAttempt`). Modules with
+  `manifest.attempts: 'repeat'` always allow new attempts and sum their points; a module's
+  optional `canStart` gates starts (turn-taking → board status `waiting`). Start → input →
+  locked (submit with `resubmission: none` or `final: true`, `lock` timer, Finish, or
+  instance closed) → evaluated → scored. Submissions link to their attempt (`attemptId`);
+  use `attemptOf` (latest) / `submissionOf(attempt)`, never "the player's submission".
+- **Live actions:** `moduleAction` → module `onAction` for rapid non-submission input (tap pads);
+  needs an in-progress attempt, separate rate limit, snapshots throttled (`commitSoon`, 250 ms) and
+  saves debounced (2 s). Big-screen panels come from the module's `displayPanel` (main audience only).
+- **Titles and categories:** `inst.title` (host-entered, '' = module name); snapshots expose `title`.
+  `inst.category` (host-entered, '' = none) groups players' boards; not the manifest `category`.
+- **Hidden results:** games start with `resultsRevealed = false`; non-host snapshots then
+  carry no points, ranks or results (masked in `snapshotFor`/`boardEntry`). Host action
+  `reveal-results` / `hide-results`. The big screen instead shows `doc.standings`, a frozen
+  leaderboard copy taken by `publish-standings`, plus `standingsFeed` (`standings.ts`).
 - **Results timing** (`manifest.results`): `immediate` evaluates each submission alone;
   `onClose` evaluates all submissions when the host closes the challenge (must be automatic).
 - **Evaluation pipeline (§14)** lives entirely in the engine: judge picking (never self, avoid
@@ -87,12 +102,22 @@ through a full game; adding a module means adding its scenario there.
   or the submitter's name to judges.
 - Non-automatic modes require `evaluation.criteria` in the manifest. Never implement judging,
   queues or deadlines in a module.
-- Bump `version` when behaviour changes; games pin `id@version`.
+- Bump `version` when behaviour changes; games pin `id@version`. A game whose pinned
+  version is gone moves to the newest installed version with the same major, so minor
+  bumps must keep `State`/`Config` compatible (bump the major otherwise).
+- Replays call `onAttemptStart` again for the same player: reset that player's data there.
 
 **Security invariants** (covered by tests; keep them passing): host routes require the bearer
 host token; assignments are visible only to the judge and host; `judge()` accepts only the
 assigned judge while pending and before the deadline; UI text is rendered as React text
 (no `dangerouslySetInnerHTML`); media is type/magic-byte checked and served with a sandbox CSP.
+
+**Host access:** `/api/local/games` hands host tokens (HMAC of `DATA_DIR/host-key`) to the
+host machine only (`isLocalRequest` in `app.ts`). The Vite proxy must keep `xfwd: true`,
+or every phone on the LAN would look local.
+
+**Setup files:** `GET /api/games/:id/setup` / `POST /api/games/import` (`GameSetup` in
+`protocol.ts`). New instance options must be added to `exportSetup` and `importSetup`.
 
 **Persistence:** `sqlite.ts` stores the game document in normalized tables. When you change
 `PersistedGame` or any table, bump `SCHEMA_VERSION` and add a step in

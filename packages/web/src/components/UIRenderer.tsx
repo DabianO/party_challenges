@@ -16,6 +16,8 @@ import type {
   RankingNode,
   SliderInputNode,
   StackNode,
+  TapPadNode,
+  StopwatchNode,
   TextInputNode,
   TextNode,
   TimerInfo,
@@ -28,7 +30,10 @@ import type {
 import { isInputNode, walkUI } from '@challenge/contract';
 import { resolveMedia } from '../lib/media';
 import { formatPoints } from '../lib/time';
+import { BlobField } from './blobs/BlobField';
 import { Countdown } from './Countdown';
+import { TapPad } from './TapPad';
+import { Stopwatch } from './Stopwatch';
 
 /** Uploads a guest evidence file (FR-57) and resolves to its `media://` reference. */
 export type EvidenceUploader = (file: File) => Promise<{ ref: string; url?: string }>;
@@ -49,6 +54,8 @@ interface FormCtx {
   submit(extra?: Payload, override?: Payload): void;
   /** Present on guest surfaces that may upload evidence for `file-input` nodes. */
   uploadEvidence?: EvidenceUploader;
+  /** Present where live actions may be sent (`tap-pad`, `stopwatch` start). */
+  action?: (payload: Payload) => void;
 }
 
 const FormContext = createContext<FormCtx>({
@@ -147,13 +154,15 @@ export interface UIViewProps {
   className?: string;
   /** Enables `file-input` nodes (guest evidence uploads). */
   uploadEvidence?: EvidenceUploader;
+  /** Enables `tap-pad` nodes and `stopwatch` start signals: live actions for the module's `onAction` (not submissions). */
+  onAction?: (payload: Payload) => void;
 }
 
 /**
  * Renders a module UI tree. Give it a `key` that changes per challenge instance so
  * form state resets between challenges.
  */
-export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, clockOffset = 0, paused = false, className, uploadEvidence }: UIViewProps) {
+export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, clockOffset = 0, paused = false, className, uploadEvidence, onAction }: UIViewProps) {
   const inputs = useMemo(() => collectInputs(node), [node]);
   const serverValues = useMemo(() => serverValuesOf(inputs), [inputs]);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
@@ -177,8 +186,8 @@ export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, c
   );
 
   const formCtx = useMemo<FormCtx>(
-    () => ({ values, setValue, interactive, disabled: disabled || !interactive, submitting, submit, uploadEvidence }),
-    [values, setValue, interactive, disabled, submitting, submit, uploadEvidence],
+    () => ({ values, setValue, interactive, disabled: disabled || !interactive, submitting, submit, uploadEvidence, action: paused ? undefined : onAction }),
+    [values, setValue, interactive, disabled, submitting, submit, uploadEvidence, paused, onAction],
   );
   const timerCtx = useMemo<TimerCtx>(() => ({ timers, clockOffset, paused }), [timers, clockOffset, paused]);
 
@@ -203,6 +212,16 @@ export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, c
       </FormContext.Provider>
     </TimerContext.Provider>
   );
+}
+
+function TapPadNodeView({ node }: { node: TapPadNode }) {
+  const form = useContext(FormContext);
+  return <TapPad node={node} onAction={form.action} />;
+}
+
+function StopwatchNodeView({ node }: { node: StopwatchNode }) {
+  const form = useContext(FormContext);
+  return <Stopwatch node={node} enabled={form.interactive && !form.disabled} submitting={form.submitting} onStart={form.action} onStop={(payload) => form.submit(payload)} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,9 +274,26 @@ function Node({ node }: { node: UINode }) {
       return <FileInput node={node} />;
     case 'button':
       return <Button node={node} />;
+    case 'tap-pad':
+      return <TapPadNodeView node={node} />;
+    case 'stopwatch':
+      return <StopwatchNodeView node={node} />;
+    case 'blob-field':
+      // Keyed by mode: the closing picture starts fresh instead of animating out of the live field.
+      return <BlobField key={node.mode} node={node} />;
     default: {
+      // The server knows content this page does not: the page is older than the server
+      // (opened before an update, or kept asleep in a phone's background). Reloading fixes it.
       const type = (node as { type?: unknown }).type;
-      return <span className="badge tone-muted">Unsupported content{typeof type === 'string' ? `: ${type}` : ''}</span>;
+      return (
+        <span className="ui-outdated" role="alert">
+          <span>This screen needs the latest version of the app.</span>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => window.location.reload()}>
+            ↻ Reload
+          </button>
+          {typeof type === 'string' && <span className="muted small">Unknown content: {type}</span>}
+        </span>
+      );
     }
   }
 }

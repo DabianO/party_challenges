@@ -43,7 +43,7 @@ const sub = (playerId: string, startedAt: number, submittedAt: number): Submissi
 describe('timed-reaction', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('timed-reaction');
-    expect(mod.manifest.version).toBe('2.0.0');
+    expect(mod.manifest.version).toBe('2.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -75,6 +75,51 @@ describe('timed-reaction', () => {
     const again = mod.onTimer!(state, 'go', ctx, 'p1');
     expect(again).toBe(state);
     expect(state.goAt.p2).toBeUndefined();
+  });
+
+  it('starts a replay from scratch: the previous GO and tap are forgotten for that player only', () => {
+    const { ctx, clock } = fakeCtx([0.25]);
+    const [alice, bob] = [players[0]!, players[1]!];
+    let state = mod.onAttemptStart!(mod.createInstance(config, ctx), alice, ctx);
+    state = mod.onAttemptStart!(state, bob, ctx);
+    clock.now += 3_000;
+    state = mod.onTimer!(state, 'go', ctx, 'p1');
+    state = mod.onTimer!(state, 'go', ctx, 'p2');
+    state = mod.handleInput(state, alice, { tap: true }, ctx);
+    expect(mod.validateInput(state, alice, { tap: true }, ctx)).toEqual({ ok: false, reason: 'You already tapped' });
+
+    state = mod.onAttemptStart!(state, alice, ctx);
+    expect(state.taps.p1).toBeUndefined();
+    expect(state.goAt.p1).toBeUndefined();
+    expect(state.goAt.p2).toBeDefined();
+    expect(mod.validateInput(state, alice, { tap: true }, ctx)).toEqual({ ok: true });
+    expect(mod.guestView(state, alice, ctx).status).toBe('Wait for green…');
+  });
+
+  it('tells the player their last and best reaction time, across replays', () => {
+    const { ctx, clock } = fakeCtx([0]); // GO after exactly 2 s
+    const alice = players[0]!;
+    const attempt = (state: ReturnType<typeof mod.createInstance>, tapAfterGoMs: number | null) => {
+      let s = mod.onAttemptStart!(state, alice, ctx);
+      clock.now += 2_000;
+      s = mod.onTimer!(s, 'go', ctx, 'p1');
+      if (tapAfterGoMs === null) return mod.onAttemptLocked!(s, alice, ctx); // never tapped
+      clock.now += tapAfterGoMs;
+      return mod.handleInput(s, alice, { tap: true }, ctx);
+    };
+    let state = mod.createInstance(config, ctx);
+    expect(mod.playerNote!(state, alice, ctx)).toBeNull();
+    state = attempt(state, 312);
+    expect(mod.playerNote!(state, alice, ctx)).toBe('312 ms · best 312 ms');
+    state = attempt(state, 400);
+    expect(mod.playerNote!(state, alice, ctx)).toBe('400 ms · best 312 ms');
+    state = attempt(state, null);
+    expect(mod.playerNote!(state, alice, ctx)).toBe('Too late · best 312 ms');
+    // A tap before GO is a false start; the best time stays.
+    state = mod.onAttemptStart!(state, alice, ctx);
+    state = mod.handleInput(state, alice, { tap: true }, ctx);
+    expect(mod.playerNote!(state, alice, ctx)).toBe('False start · best 312 ms');
+    expect(mod.playerNote!(state, players[1]!, ctx)).toBeNull();
   });
 
   it('swaps min/max delay when misconfigured', () => {
@@ -112,19 +157,19 @@ describe('timed-reaction', () => {
     const goP2 = t0 + 10_000;
 
     const e1 = mod.evaluate(state, [sub('p1', t0, goP1 + 200)], ctx); // 200 ms → full points
-    const e2 = mod.evaluate(state, [sub('p2', t0, goP2 + 750)], ctx); // 750 ms → half way
-    const e3 = mod.evaluate(state, [sub('p3', t0, goP2 + 2_000)], ctx); // slow → floor
+    const e2 = mod.evaluate(state, [sub('p2', t0, goP2 + 350)], ctx); // 350 ms → half way
+    const e3 = mod.evaluate(state, [sub('p3', t0, goP2 + 2_000)], ctx); // slow → 0, never negative
     const e4 = mod.evaluate(state, [sub('p4', t0, t0 + 500)], ctx); // false start (no GO yet)
     const e5 = mod.evaluate({ ...state, goAt: { ...state.goAt, p4: t0 + 900 } }, [sub('p4', t0, t0 + 500)], ctx); // tapped before GO
 
     expect(e1).toEqual({ playerId: 'p1', displayName: 'Alice', reactionMs: 200, falseStart: false, points: 10 });
-    expect(e2).toEqual({ playerId: 'p2', displayName: 'Bob', reactionMs: 750, falseStart: false, points: 5.5 });
-    expect(e3).toEqual({ playerId: 'p3', displayName: 'Cara', reactionMs: 2000, falseStart: false, points: 1 });
+    expect(e2).toEqual({ playerId: 'p2', displayName: 'Bob', reactionMs: 350, falseStart: false, points: 5 });
+    expect(e3).toEqual({ playerId: 'p3', displayName: 'Cara', reactionMs: 2000, falseStart: false, points: 0 });
     expect(e4).toEqual({ playerId: 'p4', displayName: 'Dan', reactionMs: null, falseStart: true, points: 0 });
     expect(e5).toMatchObject({ reactionMs: null, falseStart: true, points: 0 });
 
     expect(mod.calculateScores(state, e1, ctx)).toEqual([{ playerId: 'p1', points: 10, reason: 'Reacted in 200 ms' }]);
-    expect(mod.calculateScores(state, e3, ctx)).toEqual([{ playerId: 'p3', points: 1, reason: 'Reacted in 2000 ms' }]);
+    expect(mod.calculateScores(state, e3, ctx)).toEqual([{ playerId: 'p3', points: 0, reason: 'Reacted in 2000 ms' }]);
     expect(mod.calculateScores(state, e4, ctx)).toEqual([{ playerId: 'p4', points: 0, reason: 'False start' }]);
 
     const stats = mod.getStatistics(state, [e1, e2, e3, e4], ctx);
@@ -134,13 +179,33 @@ describe('timed-reaction', () => {
       falseStarts: 1,
       fastestMs: 200,
       slowestMs: 2000,
-      averageMs: 983,
-      medianMs: 750,
-      stdDevMs: 753,
+      averageMs: 850,
+      medianMs: 350,
+      stdDevMs: 815,
       fastest: { name: 'Alice', ms: 200 },
     });
     expect(mod.getStatistics(state, [], ctx)).toMatchObject({ taps: 0, validTaps: 0, fastestMs: null, medianMs: null, fastest: null });
     expect(JSON.parse(JSON.stringify(e1))).toEqual(e1);
+  });
+
+  it('scores in whole-point steps from the maximum down to 0, with a configurable scale', () => {
+    const { ctx, clock } = fakeCtx();
+    const t0 = clock.now;
+    const pointsAt = (reactionMs: number, extra: Record<string, number> = {}) => {
+      const state = { ...mod.createInstance({ ...config, ...extra }, ctx), goAt: { p1: t0 } };
+      return mod.evaluate(state, [sub('p1', t0 - 3000, t0 + reactionMs)], ctx).points;
+    };
+    // Defaults: 10 points up to 200 ms, one point less every 30 ms, 0 from 500 ms.
+    expect([0, 200, 229, 230, 260, 350, 469, 470, 499, 500, 3000].map((r) => pointsAt(r))).toEqual([10, 10, 10, 9, 8, 5, 2, 1, 1, 0, 0]);
+    expect(pointsAt(150, { maxPoints: 20 })).toBe(20);
+    expect(pointsAt(215, { maxPoints: 20 })).toBe(19); // 15 ms steps
+    expect(pointsAt(400, { maxPoints: 5, fullPointsMs: 300, zeroPointsMs: 800 })).toBe(4);
+    expect(pointsAt(799, { maxPoints: 5, fullPointsMs: 300, zeroPointsMs: 800 })).toBe(1);
+    // Uneven steps still land on whole points and never go below 0.
+    for (let r = 0; r < 700; r += 7) {
+      const p = pointsAt(r, { maxPoints: 7 });
+      expect(Number.isInteger(p) && p >= 0 && p <= 7).toBe(true);
+    }
   });
 
   it('applies the false start penalty as a negative award', () => {

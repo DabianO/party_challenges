@@ -51,7 +51,9 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     ctx.schedule('lock', state.config.timeLimit, player.id);
-    return state;
+    // A replay starts with an empty caption.
+    const { [player.id]: _previous, ...captions } = state.captions;
+    return { ...state, captions };
   },
 
   validateInput(state, _player, input) {

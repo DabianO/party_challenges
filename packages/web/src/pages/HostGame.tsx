@@ -24,6 +24,11 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function HostGame() {
   const { gameId = '' } = useParams();
+  // Remount per game so switching games (e.g. to a fresh copy) never reuses another game's token.
+  return <HostGameForId key={gameId} gameId={gameId} />;
+}
+
+function HostGameForId({ gameId }: { gameId: string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const stored = getHostedGame(gameId);
   const [token, setToken] = useState(() => {

@@ -69,7 +69,7 @@ function JudgeTaskCard({ ctx, task, remaining }: { ctx: PlayCtx; task: JudgeTask
     <div className="stack gap-md">
       <div className="stack gap-xs">
         <p className="eyebrow">Judge this submission</p>
-        <h1>{task.moduleName}</h1>
+        <h1>{task.title}</h1>
       </div>
       <blockquote className="criteria">
         <span className="criteria-label">What to check</span>

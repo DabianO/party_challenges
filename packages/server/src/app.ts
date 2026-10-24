@@ -3,6 +3,7 @@ import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import type { RawData, WebSocket } from 'ws';
 import type {
@@ -12,13 +13,16 @@ import type {
   EventAudience,
   GameEvent,
   HostAction,
+  ImportSetupResponse,
   InstanceOptions,
   JoinRequest,
+  LocalGameInfo,
   ResumeRequest,
   ServerMessage,
 } from '@challenge/contract';
 import { Engine, EngineError, type GameRuntime, type ModuleRegistry, type SnapshotAudience } from '@challenge/engine';
 import { MediaError, MediaService } from './media.ts';
+import { exportSetupWithMedia, importSetupMedia } from './setup.ts';
 import type { SqliteRepository } from './sqlite.ts';
 
 export interface AppConfig {
@@ -31,7 +35,22 @@ export interface AppConfig {
   /** Optional shared secret required to create games (simple host gate for public deployments). */
   hostCreatePassword: string | null;
   webDistDir: string | null;
+  /**
+   * Dev only: the port of the Vite dev server. Page requests that reach the game server are
+   * redirected there (same host and path), instead of serving a possibly stale built client.
+   */
+  webDevPort?: number | null;
   logger?: boolean;
+  /** Server secret behind the stable per-game host tokens handed to the host machine (see `/api/local/games`). */
+  hostKey?: string | null;
+  /**
+   * Let requests from this machine list every stored game with a host token, so the host
+   * never loses access to a saved game (e.g. after opening the app on another port).
+   * Requests through a proxy on this machine count as local only when the proxy appends
+   * X-Forwarded-For (the Vite dev proxy does). Disable when a reverse proxy on this
+   * machine forwards public traffic without that header.
+   */
+  localHostAccess?: boolean;
 }
 
 interface Conn {
@@ -124,8 +143,40 @@ function bearer(req: FastifyRequest): string | undefined {
   return typeof q === 'string' ? q : undefined;
 }
 
+/** Addresses that mean "this machine": loopback plus every local interface (e.g. the LAN IP). */
+function localAddresses(): Set<string> {
+  const set = new Set(['127.0.0.1', '::1']);
+  for (const list of Object.values(networkInterfaces())) for (const iface of list ?? []) set.add(iface.address);
+  return set;
+}
+
+const normalizeIp = (ip: string | undefined): string => (ip ?? '').trim().replace(/^::ffff:/, '').replace(/^\[|\]$/g, '');
+
+/** The Host header names this machine (guards against DNS rebinding). */
+function hostHeaderIsLocal(req: FastifyRequest, local: Set<string>): boolean {
+  const host = String(req.headers.host ?? '');
+  const name = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : host.split(':')[0]!;
+  return name === 'localhost' || name.endsWith('.localhost') || local.has(name);
+}
+
+/**
+ * True when the request comes from a browser on this machine. A proxy on this machine
+ * (the Vite dev server) appends the real client address as the last X-Forwarded-For entry.
+ */
+function isLocalRequest(req: FastifyRequest, local: Set<string>): boolean {
+  if (!local.has(normalizeIp(req.socket.remoteAddress))) return false;
+  if (!hostHeaderIsLocal(req, local)) return false;
+  const xff = req.headers['x-forwarded-for'];
+  if (xff === undefined) return true;
+  const last = (Array.isArray(xff) ? xff.join(',') : xff).split(',').at(-1);
+  return local.has(normalizeIp(last));
+}
+
 function pickOptions(body: Record<string, unknown>): Partial<InstanceOptions> {
   const out: Partial<InstanceOptions> = {};
+  if ('title' in body) out.title = body.title as string;
+  if ('category' in body) out.category = body.category as string;
+  if ('allowReplay' in body) out.allowReplay = body.allowReplay as boolean;
   if ('availability' in body) out.availability = body.availability as InstanceOptions['availability'];
   if ('assignedPlayerIds' in body) out.assignedPlayerIds = body.assignedPlayerIds as string[];
   if ('evaluationMode' in body) out.evaluationMode = body.evaluationMode as InstanceOptions['evaluationMode'];
@@ -141,7 +192,9 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
     sink: { emit: (e) => hub.deliver(e), kickPlayer: (g, p) => hub.kick(g, p) },
     joinUrl: (code) => `${config.publicUrl}/join/${code}`,
     mediaUrl: (ref) => MediaService.resolveUrl(ref, config.mediaBaseUrl),
+    hostKey: config.hostKey ?? undefined,
   });
+  const local = localAddresses();
 
   const app = Fastify({ logger: config.logger ?? false, bodyLimit: 1024 * 1024 });
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
@@ -188,6 +241,37 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
     return reply.status(201).send({ game: runtime.gameSummary(), hostToken });
   });
 
+  /** Create a new game from a setup file exported by GET /api/games/:id/setup (media embedded). */
+  app.post('/api/games/import', { bodyLimit: 200 * 1024 * 1024 }, async (req, reply) => {
+    const body = (req.body ?? {}) as { setup?: unknown; hostPassword?: string };
+    if (config.hostCreatePassword && body.hostPassword !== config.hostCreatePassword) {
+      return reply.status(401).send({ error: 'Host password required' });
+    }
+    const { setup, warnings: mediaWarnings } = await importSetupMedia(body.setup, media, null);
+    const { runtime, hostToken, warnings } = engine.importSetup(setup);
+    return reply.status(201).send({ game: runtime.gameSummary(), hostToken, warnings: [...mediaWarnings, ...warnings] } satisfies ImportSetupResponse);
+  });
+
+  /** Every stored game with a host token, for a browser on the host machine only. */
+  app.get('/api/local/games', async (req, reply) => {
+    if (!config.localHostAccess || !isLocalRequest(req, local)) {
+      return reply.status(403).send({ error: 'Only available on the machine running the server' });
+    }
+    const games: LocalGameInfo[] = [];
+    for (const rt of engine.listGames()) {
+      const hostToken = engine.localHostToken(rt.id);
+      if (!hostToken) continue;
+      games.push({
+        game: rt.gameSummary(),
+        hostToken,
+        playerCount: rt.doc.players.filter((p) => p.removedAt === null).length,
+        challengeCount: rt.doc.instances.length,
+      });
+    }
+    games.sort((a, b) => b.game.createdAt - a.game.createdAt);
+    return { games };
+  });
+
   app.get('/api/games/:id', async (req) => {
     const game = hostGame(req);
     return { snapshot: game.snapshotFor({ role: 'host' }) };
@@ -209,6 +293,21 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
   app.get('/api/games/:id/ledger', async (req) => {
     const game = hostGame(req);
     return { ledger: game.ledger };
+  });
+
+  /** Start over: a new DRAFT game with this game's setup and no players or scores. */
+  app.post('/api/games/:id/duplicate', async (req, reply) => {
+    const game = hostGame(req);
+    const { runtime, hostToken, warnings } = engine.duplicateGame(game.id);
+    return reply.status(201).send({ game: runtime.gameSummary(), hostToken, warnings } satisfies ImportSetupResponse);
+  });
+
+  /** The game's configuration as a portable JSON setup (board, settings, branding, media). */
+  app.get('/api/games/:id/setup', async (req, reply) => {
+    const game = hostGame(req);
+    const setup = await exportSetupWithMedia(game, media);
+    const file = `${game.gameSummary().name.replace(/[^A-Za-z0-9 _-]/g, '').trim().replace(/\s+/g, '-') || 'game'}-setup.json`;
+    return reply.header('Content-Disposition', `attachment; filename="${file}"`).send(setup);
   });
 
   app.get('/api/games/:id/export', async (req) => {
@@ -459,12 +558,17 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
           }
           case 'SUBMIT': {
             const pid = requirePlayer(msg.clientId);
-            if (pid) ack(msg.clientId, game.submit(pid, String(msg.instanceId), msg.payload));
+            if (pid) ack(msg.clientId, game.submit(pid, String(msg.instanceId), msg.payload, msg.final === true));
             break;
           }
           case 'FINISH': {
             const pid = requirePlayer(msg.clientId);
             if (pid) ack(msg.clientId, game.finishAttempt(pid, String(msg.instanceId)));
+            break;
+          }
+          case 'ACTION': {
+            const pid = requirePlayer(msg.clientId);
+            if (pid) ack(msg.clientId, game.moduleAction(pid, String(msg.instanceId), msg.payload));
             break;
           }
           case 'JUDGE': {
@@ -502,6 +606,16 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
         return reply.status(404).send({ error: 'Not found' });
       }
       return reply.sendFile('index.html');
+    });
+  } else if (config.webDevPort) {
+    // Dev: the web client lives on the Vite dev server. A page opened on this port (an old
+    // link or bookmark) goes there, on the same host the browser used, rather than to an old build.
+    const devPort = config.webDevPort;
+    app.setNotFoundHandler((req: FastifyRequest, reply: FastifyReply) => {
+      const api = req.url.startsWith('/api/') || req.url.startsWith('/media/') || req.url.startsWith('/ws');
+      if (api || req.method !== 'GET') return reply.status(404).send({ error: 'Not found' });
+      const host = (req.headers.host ?? 'localhost').replace(/:\d+$/, '');
+      return reply.redirect(`${req.protocol}://${host}:${devPort}${req.url}`, 302);
     });
   }
 

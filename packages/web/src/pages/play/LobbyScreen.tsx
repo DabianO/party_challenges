@@ -1,6 +1,4 @@
 import type { PlayCtx } from '../Play';
-import { EvaluationBadge } from '../../components/PhaseBadge';
-import { formatDuration } from '../../lib/time';
 
 export function LobbyScreen({ ctx }: { ctx: PlayCtx }) {
   const { game, players, challenges } = ctx.snapshot;
@@ -30,16 +28,13 @@ export function LobbyScreen({ ctx }: { ctx: PlayCtx }) {
                   {i + 1}
                 </span>
                 <span className="grow stack gap-xs">
-                  <strong>{c.moduleName}</strong>
-                  <span className="muted small">
-                    {c.moduleCategory} · ~{formatDuration(c.typicalSeconds)}
-                  </span>
+                  <strong>{c.title}</strong>
+                  {c.title !== c.moduleName && <span className="muted small">{c.moduleName}</span>}
                 </span>
-                <EvaluationBadge mode={c.evaluationMode} short />
               </li>
             ))}
           </ol>
-          <p className="muted small center-text">Each challenge is played at your own pace once the game starts.</p>
+          <p className="muted small center-text">Once the game starts, tap a challenge to play it at your own pace.</p>
         </div>
       )}
     </section>

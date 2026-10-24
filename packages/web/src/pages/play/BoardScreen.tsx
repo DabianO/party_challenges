@@ -1,12 +1,14 @@
+import { useCallback, useState } from 'react';
 import type { AttemptStatus, BoardEntry } from '@challenge/contract';
 import { Countdown } from '../../components/Countdown';
-import { EvaluationBadge } from '../../components/PhaseBadge';
-import { formatDuration, formatPoints } from '../../lib/time';
+import { useToast } from '../../components/Toast';
+import { formatPoints } from '../../lib/time';
 import type { PlayCtx } from '../Play';
 
 const ORDER: Record<AttemptStatus, number> = {
   in_progress: 0,
   available: 1,
+  waiting: 1.8,
   submitted: 2,
   scored: 3,
   closed: 4,
@@ -15,7 +17,30 @@ const ORDER: Record<AttemptStatus, number> = {
 };
 
 export function sortBoard(board: BoardEntry[]): BoardEntry[] {
-  return [...board].sort((a, b) => ORDER[a.status] - ORDER[b.status]);
+  // Playable first (a replayable tile counts as playable), the board order otherwise.
+  const rank = (b: BoardEntry) => (b.canReplay && ORDER[b.status] > 1 ? 1.5 : ORDER[b.status]);
+  return [...board].sort((a, b) => rank(a) - rank(b));
+}
+
+export interface BoardGroup {
+  /** '' when the host gave no category. */
+  category: string;
+  entries: BoardEntry[];
+}
+
+/**
+ * Challenges grouped by the host's category, in board order (a category sits where its first
+ * challenge is). Challenges without a category come last. Inside a group, playable ones first.
+ */
+export function groupBoard(board: BoardEntry[]): BoardGroup[] {
+  const groups = new Map<string, BoardEntry[]>();
+  for (const entry of board) {
+    const key = entry.category ?? '';
+    groups.set(key, [...(groups.get(key) ?? []), entry]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0))
+    .map(([category, entries]) => ({ category, entries: sortBoard(entries) }));
 }
 
 /** The player's own `lock` timer for an attempt, if any. */
@@ -23,120 +48,158 @@ export function lockTimer(entry: BoardEntry, meId: string) {
   return entry.timers.find((t) => t.tag === 'lock' && t.playerId === meId);
 }
 
+/** Start (or replay) a challenge and open it once the server has started the attempt. */
+export function useStartChallenge(ctx: PlayCtx) {
+  const toast = useToast();
+  const [starting, setStarting] = useState<string | null>(null);
+  const { sock, openChallenge } = ctx;
+  const start = useCallback(
+    async (instanceId: string) => {
+      setStarting(instanceId);
+      const res = await sock.start(instanceId);
+      setStarting(null);
+      // The server sends the new snapshot before its ACK, so the attempt is already live here.
+      if (res.ok) openChallenge(instanceId);
+      else toast(res.reason ?? 'Could not start', 'danger');
+    },
+    [sock, openChallenge, toast],
+  );
+  return { starting, start };
+}
+
 export function BoardScreen({ ctx }: { ctx: PlayCtx }) {
   const { board, game } = ctx.snapshot;
-  const sorted = sortBoard(board);
-  const done = board.filter((b) => b.status === 'scored' || b.status === 'missed' || b.status === 'closed').length;
-  const playable = board.filter((b) => b.status === 'available' || b.status === 'in_progress').length;
+  const { starting, start } = useStartChallenge(ctx);
+  const groups = groupBoard(board);
+  // Headings only once the host has used categories.
+  const headed = groups.some((g) => g.category !== '');
+  const doneIn = (entries: BoardEntry[]) => entries.filter((b) => b.attempts > 0 && b.status !== 'in_progress').length;
+  const tiles = (entries: BoardEntry[]) => (
+    <ul className="plain-list tiles">
+      {entries.map((entry) => (
+        <Tile
+          key={entry.instanceId}
+          entry={entry}
+          ctx={ctx}
+          revealed={game.resultsRevealed}
+          paused={game.paused}
+          starting={starting === entry.instanceId}
+          busy={starting !== null}
+          onStart={() => void start(entry.instanceId)}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <section className="stack gap-md">
-      <div className="stack gap-xs">
-        <p className="eyebrow">Challenge board</p>
-        <h1>Pick a challenge</h1>
-        <p className="muted small">
-          {playable > 0 ? `${playable} ready to play · ` : ''}
-          {done} of {board.length} done
-        </p>
+      <div className="row align-center justify-between gap-sm">
+        <h1>Challenges</h1>
+        {board.length > 0 && (
+          <span className="badge tone-muted">
+            {doneIn(board)}/{board.length} done
+          </span>
+        )}
       </div>
-      {sorted.length === 0 && <p className="muted">No challenges are available to you yet. Keep an eye on this screen.</p>}
-      <ul className="plain-list board">
-        {sorted.map((entry) => (
-          <BoardCard key={entry.instanceId} entry={entry} ctx={ctx} paused={game.paused} />
-        ))}
-      </ul>
+      {board.length === 0 && <p className="muted">No challenges are available to you yet. Keep an eye on this screen.</p>}
+      {headed
+        ? groups.map((g) => (
+            <section key={g.category} className="board-group stack gap-sm" aria-label={g.category || 'Other challenges'}>
+              <div className="row align-center justify-between gap-sm">
+                <h2 className="board-group-title">{g.category || 'Other'}</h2>
+                <span className="muted small mono">
+                  {doneIn(g.entries)}/{g.entries.length}
+                </span>
+              </div>
+              {tiles(g.entries)}
+            </section>
+          ))
+        : groups[0] && tiles(groups[0].entries)}
     </section>
   );
 }
 
-const STATUS_CHIP: Record<AttemptStatus, { label: string; tone: string; icon: string }> = {
-  available: { label: 'Ready', tone: 'tone-success', icon: '▶' },
-  in_progress: { label: 'In progress', tone: 'tone-primary', icon: '⏱' },
-  submitted: { label: 'Waiting for results', tone: 'tone-warning', icon: '⏳' },
-  scored: { label: 'Scored', tone: 'tone-success', icon: '✓' },
-  missed: { label: 'Time ran out', tone: 'tone-danger', icon: '✕' },
-  locked: { label: 'Not unlocked yet', tone: 'tone-muted', icon: '🔒' },
-  closed: { label: 'Closed', tone: 'tone-muted', icon: '■' },
-};
+type TileAction = 'start' | 'open' | null;
 
-function BoardCard({ entry, ctx, paused }: { entry: BoardEntry; ctx: PlayCtx; paused: boolean }) {
-  const chip = STATUS_CHIP[entry.status];
-  const timer = entry.status === 'in_progress' ? lockTimer(entry, ctx.meId) : undefined;
-  const open = () => ctx.openChallenge(entry.instanceId);
-  const tappable = entry.status !== 'locked' && !(entry.status === 'closed' && !entry.result) && !(entry.status === 'missed' && !entry.result);
+function tileAction(entry: BoardEntry, revealed: boolean): TileAction {
+  if (entry.status === 'in_progress') return 'open';
+  if (entry.status === 'available' && entry.repeat) return 'start'; // e.g. it is your turn
+  // Once results are revealed a finished tile opens the player's result (with "play again" there).
+  if (revealed && entry.result) return 'open';
+  if (entry.status === 'available' || entry.canReplay) return 'start';
+  return null;
+}
 
-  let action: JSX.Element | null;
+function tileState(entry: BoardEntry, revealed: boolean): { icon: string; label: string } {
+  const again = entry.canReplay ? ' · tap to play again' : '';
+  // The module's own words (e.g. "Your turn!") win over the generic labels.
+  if (entry.statusText && (entry.status === 'available' || entry.status === 'waiting')) {
+    return { icon: entry.status === 'available' ? '▶' : '⏳', label: entry.statusText };
+  }
   switch (entry.status) {
     case 'available':
-      action = (
-        <button type="button" className="btn btn-primary" onClick={open}>
-          ▶ Play
-        </button>
-      );
-      break;
+      return { icon: '▶', label: 'Tap to play' };
+    case 'waiting':
+      return { icon: '⏳', label: 'Not your turn yet' };
     case 'in_progress':
-      action = (
-        <button type="button" className="btn btn-primary" onClick={open}>
-          Continue →
-        </button>
-      );
-      break;
-    case 'submitted':
-      action = (
-        <button type="button" className="btn btn-secondary" onClick={open}>
-          View
-        </button>
-      );
-      break;
+      return { icon: '⏱', label: 'Playing — tap to continue' };
     case 'scored':
-      action = (
-        <button type="button" className="btn btn-secondary" onClick={open} aria-label={`See your result for ${entry.moduleName}`}>
-          <span className="points-badge">
-            {entry.points !== null && entry.points > 0 ? '+' : ''}
-            {formatPoints(entry.points ?? 0)} pts
-          </span>
-        </button>
-      );
-      break;
-    case 'closed':
+      return { icon: '✓', label: `${entry.points !== null && entry.points > 0 ? '+' : ''}${formatPoints(entry.points ?? 0)} pts${again}` };
+    case 'submitted':
+      return revealed ? { icon: '⏳', label: `Being scored${again}` } : { icon: '✓', label: `Done${again}` };
     case 'missed':
-      action = entry.result ? (
-        <button type="button" className="btn btn-secondary" onClick={open}>
-          Results
-        </button>
-      ) : null;
-      break;
+      return { icon: '✕', label: `Time ran out${again}` };
     case 'locked':
-      action = null;
-      break;
+      return { icon: '🔒', label: 'Not open yet' };
+    case 'closed':
+      return { icon: '■', label: entry.result ? 'Closed · tap for results' : 'Closed' };
   }
+}
+
+function Tile({
+  entry,
+  ctx,
+  revealed,
+  paused,
+  starting,
+  busy,
+  onStart,
+}: {
+  entry: BoardEntry;
+  ctx: PlayCtx;
+  revealed: boolean;
+  paused: boolean;
+  starting: boolean;
+  busy: boolean;
+  onStart: () => void;
+}) {
+  const action = tileAction(entry, revealed);
+  const state = starting ? { icon: '…', label: 'Starting' } : tileState(entry, revealed);
+  const timer = entry.status === 'in_progress' ? lockTimer(entry, ctx.meId) : undefined;
+  const playable = action === 'start';
+  const disabled = action === null || busy || (playable && paused);
+  const onClick = () => {
+    if (action === 'start') onStart();
+    else if (action === 'open') ctx.openChallenge(entry.instanceId);
+  };
 
   return (
-    <li className={`board-card status-${entry.status}`}>
-      <div className="board-card-head">
-        <span className={`badge ${chip.tone}`}>
-          <span aria-hidden="true">{chip.icon}</span> {chip.label}
+    <li>
+      <button
+        type="button"
+        className={`tile status-${entry.status}${playable ? ' is-playable' : ''}${action === null ? ' is-inert' : ''}`}
+        disabled={disabled}
+        aria-busy={starting || undefined}
+        onClick={onClick}
+      >
+        <span className="tile-title">{entry.title}</span>
+        {entry.title !== entry.moduleName && <span className="tile-sub">{entry.moduleName}</span>}
+        <span className="tile-state">
+          <span aria-hidden="true">{state.icon}</span> {state.label}
         </span>
-        <span className="badge tone-muted">{entry.moduleCategory}</span>
-      </div>
-      <h2 className="board-card-title">{entry.status === 'locked' ? entry.moduleName : entry.moduleName}</h2>
-      <p className="board-card-desc">{entry.description}</p>
-      <div className="board-card-meta">
-        <span className="muted small">~{formatDuration(entry.typicalSeconds)}</span>
-        <EvaluationBadge mode={entry.evaluationMode} />
-      </div>
-      {timer && (
-        <div className="board-card-timer">
-          <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} label="Time left" />
-        </div>
-      )}
-      {entry.status === 'submitted' && entry.statusText && (
-        <p className="muted small" role="status">
-          {entry.statusText}
-        </p>
-      )}
-      {action && <div className="board-card-action">{action}</div>}
-      {!tappable && entry.status === 'locked' && <p className="muted small">The host will unlock this one later.</p>}
+        {entry.note && <span className="tile-note">{entry.note}</span>}
+        {timer && <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} size="sm" label="Time left" />}
+      </button>
     </li>
   );
 }

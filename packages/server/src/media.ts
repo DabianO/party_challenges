@@ -8,7 +8,7 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, createReadStream, existsSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newId } from '@challenge/engine';
 import type { MediaRecord, SqliteRepository } from './sqlite.ts';
@@ -86,6 +86,19 @@ export class MediaService {
     const path = join(this.dir, record.storageRef);
     if (!existsSync(path)) return null;
     return { record, stream: () => createReadStream(path) };
+  }
+
+  /** Whole file contents for a `media://<id>` reference (setup exports); null when unknown or missing. */
+  async read(ref: string): Promise<{ record: MediaRecord; data: Buffer } | null> {
+    const id = MediaService.idOf(ref);
+    const found = id ? this.get(id) : null;
+    if (!found) return null;
+    return { record: found.record, data: await readFile(join(this.dir, found.record.storageRef)) };
+  }
+
+  /** The media id of a `media://<id>` reference, or null for anything else. */
+  static idOf(ref: string): string | null {
+    return /^media:\/\/([A-Za-z0-9_-]+)$/.exec(ref)?.[1] ?? null;
   }
 
   static ref(id: string): string {

@@ -76,7 +76,9 @@ export default defineModule<Config, State, Input, Evaluation>({
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
     ctx.schedule('lock', state.config.timeLimit, player.id);
-    return state;
+    // A replay starts with an empty answer.
+    const { [player.id]: _previous, ...answers } = state.answers;
+    return { ...state, answers };
   },
 
   validateInput(_state, _player, input) {

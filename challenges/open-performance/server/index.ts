@@ -58,7 +58,9 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     ctx.schedule('lock', state.config.timeLimit, player.id);
-    return state;
+    // A replay starts with an empty entry.
+    const { [player.id]: _previous, ...entries } = state.entries;
+    return { ...state, entries };
   },
 
   validateInput(state, _player, input) {

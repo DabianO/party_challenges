@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ChallengeInstanceSummary, HostAction } from '@challenge/contract';
 import { AvailabilityBadge, EvaluationBadge, PhaseBadge } from '../../components/PhaseBadge';
 import { formatPoints } from '../../lib/time';
-import type { HostCtx } from './hostApi';
+import { subtitleOf, type HostCtx } from './hostApi';
 import { PlayerPicker } from './InstanceOptionsFields';
 import { ResultsDetail } from './ResultsBits';
 
@@ -11,6 +11,7 @@ export type Act = (action: HostAction, confirmText?: string) => Promise<boolean>
 export function statsLine(c: ChallengeInstanceSummary): string {
   const s = c.stats;
   const parts = [`${s.started} started`, `${s.submitted} submitted`, `${s.scored} scored`];
+  if (s.attempts > s.started) parts.splice(1, 0, `${s.attempts} attempts`);
   if (s.pendingEvaluations > 0) parts.push(`${s.pendingEvaluations} waiting for judgement`);
   if (s.averagePoints !== null) parts.push(`avg ${formatPoints(s.averagePoints)}`);
   if (s.bestPoints !== null) parts.push(`best ${formatPoints(s.bestPoints)}`);
@@ -38,14 +39,14 @@ function ChallengeRow({ ctx, c, index, act, busy, running }: { ctx: HostCtx; c: 
   const id = c.id;
 
   const unlock = () => act({ action: 'unlock-challenge', instanceId: id });
-  const relock = () => act({ action: 'relock-challenge', instanceId: id }, `Hide "${c.moduleName}" again? Players who have not started will no longer see it.`);
+  const relock = () => act({ action: 'relock-challenge', instanceId: id }, `Hide "${c.title}" again? Players who have not started will no longer see it.`);
   const close = () =>
     act(
       { action: 'close-challenge', instanceId: id },
-      `Close "${c.moduleName}"? No new attempts can start; running attempts lock now${c.results === 'onClose' ? ' and everyone is scored' : ''}.`,
+      `Close "${c.title}"? No new attempts can start; running attempts lock now${c.results === 'onClose' ? ' and everyone is scored' : ''}.`,
     );
   const reopen = () => act({ action: 'reopen-challenge', instanceId: id });
-  const reset = () => act({ action: 'reset-challenge', instanceId: id }, `Reset "${c.moduleName}"? All attempts are discarded and points from it are reversed.`);
+  const reset = () => act({ action: 'reset-challenge', instanceId: id }, `Reset "${c.title}"? All attempts are discarded and points from it are reversed. Until someone plays it again you can change all of its settings in the Setup tab.`);
   const retry = () => act({ action: 'retry-evaluation', instanceId: id });
   const assign = async () => {
     const ok = await act({ action: 'assign-challenge', instanceId: id, playerIds: picked });
@@ -60,14 +61,15 @@ function ChallengeRow({ ctx, c, index, act, busy, running }: { ctx: HostCtx; c: 
         </span>
         <div className="grow stack gap-xs">
           <span className="row gap-sm align-center wrap">
-            <strong>{c.moduleName}</strong>
-            <PhaseBadge phase={c.phase} />
+            <strong>{c.title}</strong>
+            <PhaseBadge phase={c.phase} availability={c.availability} started={ctx.snapshot.game.startedAt !== null} />
           </span>
-          {c.title && <span className="muted small clamp">{c.title}</span>}
+          {subtitleOf(c) && <span className="muted small clamp">{subtitleOf(c)}</span>}
           <span className="row gap-xs wrap">
             <AvailabilityBadge availability={c.availability} assignedCount={c.assignedPlayerIds?.length} />
             <EvaluationBadge mode={c.evaluationMode} />
             <span className="badge tone-muted">{c.results === 'immediate' ? 'Scored on submit' : 'Scored when closed'}</span>
+            {c.allowReplay && <span className="badge tone-primary">↻ Replays</span>}
           </span>
           <span className="muted small mono">{statsLine(c)}</span>
           {c.error && (

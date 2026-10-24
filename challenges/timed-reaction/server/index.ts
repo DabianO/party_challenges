@@ -15,6 +15,10 @@ interface Config {
   maxDelaySeconds: number;
   windowSeconds: number;
   maxPoints: number;
+  /** Reaction times up to this many ms earn maxPoints (absent before 2.3). */
+  fullPointsMs?: number;
+  /** Reaction times from this many ms on earn 0 points (absent before 2.3). */
+  zeroPointsMs?: number;
   falseStartPenalty: number;
 }
 
@@ -31,6 +35,10 @@ interface State {
   goAt: Record<string, number>;
   /** playerId → the player's single tap. */
   taps: Record<string, Tap>;
+  /** playerId → outcome of their latest attempt, kept across replays (absent in pre-2.2 state). */
+  last?: Record<string, number | 'false-start' | 'missed'>;
+  /** playerId → their fastest valid reaction in ms, kept across replays. */
+  best?: Record<string, number>;
 }
 
 interface Input {
@@ -47,27 +55,30 @@ interface Evaluation {
   points: number;
 }
 
-/** Reaction times up to this many ms earn full points… */
-const FULL_POINTS_MS = 250;
-/** …then points fall linearly to the 1-point floor at this reaction time. */
-const FLOOR_MS = 1250;
+/** Defaults for instances created before 2.3, whose config has no timing scale. */
+const FULL_POINTS_MS = 200;
+const ZERO_POINTS_MS = 500;
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
-}
-
-function round1(n: number): number {
-  return Math.round(n * 10) / 10;
 }
 
 function ms(n: number): string {
   return `${Math.round(n)} ms`;
 }
 
-/** Absolute score: full points up to 250 ms, linearly down to 1 point at 1250 ms, never below 1. */
-function pointsFor(reactionMs: number, maxPoints: number): number {
-  const progress = Math.min(1, Math.max(0, (reactionMs - FULL_POINTS_MS) / (FLOOR_MS - FULL_POINTS_MS)));
-  return Math.max(1, round1(1 + (maxPoints - 1) * (1 - progress)));
+/**
+ * Absolute score in whole-point steps: `maxPoints` up to `fullPointsMs`, then one point less
+ * for every equal slice of time, down to 0 from `zeroPointsMs` on. Never negative.
+ */
+function pointsFor(reactionMs: number, config: Config): number {
+  const max = Math.max(0, Math.round(config.maxPoints));
+  const fast = config.fullPointsMs ?? FULL_POINTS_MS;
+  const slow = Math.max(fast + 1, config.zeroPointsMs ?? ZERO_POINTS_MS);
+  if (max === 0 || reactionMs >= slow) return 0;
+  if (reactionMs <= fast) return max;
+  const step = (slow - fast) / max;
+  return Math.min(max, Math.max(0, max - Math.floor((reactionMs - fast) / step)));
 }
 
 function penaltyOf(config: Config): number {
@@ -91,7 +102,10 @@ export default defineModule<Config, State, Input, Evaluation>({
     // The pending delay is deliberately not stored in state so no view can leak it.
     // There is no `lock` yet: it is scheduled once GO fires, so the tap window is fair.
     ctx.schedule('go', lo + ctx.rng() * (hi - lo), player.id);
-    return state;
+    // A replay starts from "Wait…" again: forget the previous GO and tap.
+    const { [player.id]: _go, ...goAt } = state.goAt;
+    const { [player.id]: _tap, ...taps } = state.taps;
+    return { ...state, goAt, taps };
   },
 
   onTimer(state, tag, ctx, playerId) {
@@ -114,7 +128,32 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   handleInput(state, player, _input, ctx) {
     const goAt = state.goAt[player.id];
-    return { ...state, taps: { ...state.taps, [player.id]: { tappedAt: ctx.now(), falseStart: goAt === undefined || ctx.now() < goAt } } };
+    const now = ctx.now();
+    const falseStart = goAt === undefined || now < goAt;
+    const reaction = falseStart ? null : now - (goAt as number);
+    const best = state.best ?? {};
+    const prevBest = best[player.id];
+    return {
+      ...state,
+      taps: { ...state.taps, [player.id]: { tappedAt: now, falseStart } },
+      // Practice feedback (playerNote): the latest outcome and the fastest time so far.
+      last: { ...(state.last ?? {}), [player.id]: reaction ?? 'false-start' },
+      best: reaction !== null && (prevBest === undefined || reaction < prevBest) ? { ...best, [player.id]: reaction } : best,
+    };
+  },
+
+  onAttemptLocked(state, player) {
+    // Locked without a tap: the tap window ran out.
+    if (state.taps[player.id]) return state;
+    return { ...state, last: { ...(state.last ?? {}), [player.id]: 'missed' } };
+  },
+
+  playerNote(state, player) {
+    const last = state.last?.[player.id];
+    if (last === undefined) return null;
+    const best = state.best?.[player.id];
+    const lastText = last === 'false-start' ? 'False start' : last === 'missed' ? 'Too late' : ms(last);
+    return best === undefined ? lastText : `${lastText} · best ${ms(best)}`;
   },
 
   evaluate(state, submissions, ctx) {
@@ -125,7 +164,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const falseStart = goAt === undefined || s.submittedAt < goAt;
     const reactionMs = falseStart ? null : Math.max(0, s.submittedAt - (goAt as number));
     const penalty = penaltyOf(state.config);
-    const points = reactionMs === null ? (penalty > 0 ? -penalty : 0) : pointsFor(reactionMs, state.config.maxPoints);
+    const points = reactionMs === null ? (penalty > 0 ? -penalty : 0) : pointsFor(reactionMs, state.config);
     return { playerId: s.playerId, displayName: nameOf(ctx.players(), s.playerId), reactionMs, falseStart, points };
   },
 
@@ -168,7 +207,7 @@ export default defineModule<Config, State, Input, Evaluation>({
       [
         ui.text(`${INSTRUCTION}. The wait is random, so keep your eyes on the screen.`),
         ui.caption(
-          `${c.maxPoints} points for a lightning-fast tap, fewer the slower you are. Tapping before green is a false start${penalty > 0 ? ` (-${penalty} points)` : ''}.`,
+          `${c.maxPoints} points for a lightning-fast tap, fewer the slower you are, 0 from ${ms(c.zeroPointsMs ?? ZERO_POINTS_MS)}. Tapping before green is a false start${penalty > 0 ? ` (-${penalty} points)` : ''}.`,
         ),
       ],
       { gap: 'sm' },

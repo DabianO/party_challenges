@@ -38,8 +38,17 @@ export function phaseLabel(phase: ChallengePhase): string {
   return PHASES[phase].label;
 }
 
-export function PhaseBadge({ phase, size }: { phase: ChallengePhase; size?: 'lg' }) {
-  const { label, tone, icon } = PHASES[phase];
+/**
+ * Pass `availability` and whether the game has started to say *why* a PENDING challenge
+ * is not playable: open/assigned ones open by themselves when the game starts.
+ */
+export function PhaseBadge({ phase, size, availability, started }: { phase: ChallengePhase; size?: 'lg'; availability?: Availability; started?: boolean }) {
+  let { label, tone, icon } = PHASES[phase];
+  if (phase === 'PENDING' && availability !== undefined) {
+    if (availability === 'host-unlocked') ({ label, tone, icon } = { label: 'Hidden until you unlock it', tone: 'muted', icon: '🔑' });
+    else if (!started) ({ label, tone, icon } = { label: 'Opens at start', tone: 'primary', icon: '⏰' });
+    else ({ label, tone, icon } = { label: 'Hidden', tone: 'muted', icon: '🔒' });
+  }
   return (
     <span className={`badge tone-${tone}${size ? ` badge-${size}` : ''}`}>
       <span aria-hidden="true">{icon}</span> {label}

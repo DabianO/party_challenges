@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { GameStatus } from '@challenge/contract';
 import { StatusBadge } from '../components/PhaseBadge';
 import { useToast } from '../components/Toast';
 import { ApiError, api, errorMessage } from '../lib/api';
+import { readSetupFile } from '../lib/setupFile';
 import { listHostedGames, removeHostedGame, saveHostedGame, type HostedGame } from '../lib/storage';
 import { formatDate } from '../lib/time';
 
@@ -19,6 +20,31 @@ export function HostHome() {
   const [error, setError] = useState<string | null>(null);
   const [games, setGames] = useState<HostedGame[]>(() => listHostedGames());
   const [statuses, setStatuses] = useState<Record<string, Known>>({});
+  const [importing, setImporting] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  // On the host machine the server lists every saved game, so nothing is lost when this
+  // browser forgot them (another port or address means another browser storage).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .localGames()
+      .then((list) => {
+        if (cancelled) return;
+        const known = new Map(listHostedGames().map((g) => [g.id, g]));
+        for (const { game, hostToken } of [...list].reverse()) {
+          if (!known.has(game.id)) saveHostedGame({ id: game.id, name: game.name, code: game.code, hostToken, createdAt: game.createdAt });
+        }
+        setGames(listHostedGames().sort((a, b) => b.createdAt - a.createdAt));
+        setStatuses((s) => ({ ...s, ...Object.fromEntries(list.map(({ game }) => [game.id, { status: game.status }])) }));
+      })
+      .catch(() => {
+        /* not the host machine (or an older server): the games saved in this browser still show */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +90,29 @@ export function HostHome() {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const importFile = async (file: File) => {
+    setImporting(true);
+    setError(null);
+    try {
+      const setup = await readSetupFile(file);
+      const res = await api.importSetup(setup, needsPassword ? password : undefined);
+      saveHostedGame({ id: res.game.id, name: res.game.name, code: res.game.code, hostToken: res.hostToken, createdAt: res.game.createdAt });
+      if (res.warnings.length > 0) toast(`Imported with ${res.warnings.length} warning(s): ${res.warnings.join(' · ')}`, 'warning');
+      else toast(`Imported "${res.game.name}"`, 'success');
+      navigate(`/host/${res.game.id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setNeedsPassword(true);
+        setError(password ? 'Wrong host password' : 'This server requires a host password — enter it, then import again');
+      } else {
+        setError(errorMessage(err));
+      }
+    } finally {
+      setImporting(false);
+      if (fileInput.current) fileInput.current.value = '';
     }
   };
 
@@ -113,6 +162,23 @@ export function HostHome() {
             {busy ? 'Creating…' : 'Create game'}
           </button>
         </form>
+        <div className="stack gap-xs">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            id="import-setup"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void importFile(file);
+            }}
+          />
+          <button type="button" className="btn btn-secondary" disabled={importing} onClick={() => fileInput.current?.click()}>
+            {importing ? 'Importing…' : '⬆ Import a setup file'}
+          </button>
+          <span className="field-help">Restores a backup downloaded from a game's Setup tab as a new game.</span>
+        </div>
       </section>
 
       <section className="stack gap-sm">

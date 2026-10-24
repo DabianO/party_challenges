@@ -65,7 +65,7 @@ function EvaluationsTable({ rows }: { rows: EvaluationRecord[] }) {
             const st = STATUS[r.status];
             return (
               <tr key={r.assignmentId}>
-                <td>{r.moduleName}</td>
+                <td>{r.title}</td>
                 <td>{r.displayName}</td>
                 <td>{r.decidedBy === 'host' ? 'Host' : r.judgeName ?? (r.judgePlayerId ? 'Player' : '—')}</td>
                 <td>
@@ -91,7 +91,7 @@ function ScoredRow({ ctx, s }: { ctx: HostCtx; s: ScoredSubmissionSummary }) {
     <li className="card card-flat stack gap-sm scored-row">
       <div className="row gap-sm wrap align-center">
         <strong className="grow">
-          {s.displayName} <span className="muted">· {s.moduleName}</span>
+          {s.displayName} <span className="muted">· {s.title}</span>
         </strong>
         <span className="points-badge">
           {s.points > 0 ? '+' : ''}

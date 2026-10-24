@@ -33,8 +33,15 @@ export function computeLeaderboard(input: LeaderboardInput): LeaderboardEntry[] 
 
   const wins = computeWins(input.ledger, input.instances, new Set(totals.keys()));
   const avgTimes = computeAverageSubmissionSeconds(input.attempts, input.submissions);
-  const completed = new Map<string, number>();
-  for (const a of input.attempts) if (a.status === 'scored') completed.set(a.playerId, (completed.get(a.playerId) ?? 0) + 1);
+  // Challenges completed: instances with a finished attempt (replays count once).
+  const done = new Map<string, Set<string>>();
+  for (const a of input.attempts) {
+    if (a.status === 'in_progress') continue;
+    const set = done.get(a.playerId) ?? new Set<string>();
+    set.add(a.challengeInstanceId);
+    done.set(a.playerId, set);
+  }
+  const completed = new Map([...done].map(([id, set]) => [id, set.size] as const));
 
   const entries = active.map((p) => ({
     playerId: p.id,
@@ -70,9 +77,42 @@ export function computeLeaderboard(input: LeaderboardInput): LeaderboardEntry[] 
       wins: e.wins,
       completed: e.completed,
       connected: e.connected,
+      series: computeSeries(e.playerId, input.attempts, input.ledger),
     });
   }
   return out;
+}
+
+/**
+ * The player's running total after each challenge they finished, in finishing order
+ * (first finished attempt per instance; replays keep that slot). Each step adds the
+ * instance's *current* points, so improvements and late judgements move the line. Manual
+ * adjustments land at the step where they happened; points from instances the player has
+ * no finished attempt for land on the last step, so the line always ends at the total.
+ */
+export function computeSeries(playerId: string, attempts: PersistedAttempt[], ledger: ScoreLedgerEntry[]): number[] {
+  const finishedAt = new Map<string, number>();
+  for (const a of attempts) {
+    if (a.playerId !== playerId || a.status === 'in_progress') continue;
+    const at = a.lockedAt ?? a.startedAt;
+    const prev = finishedAt.get(a.challengeInstanceId);
+    if (prev === undefined || at < prev) finishedAt.set(a.challengeInstanceId, at);
+  }
+  const order = [...finishedAt.entries()].sort((a, b) => a[1] - b[1]);
+  const steps = new Array<number>(order.length + 1).fill(0);
+  const stepOf = new Map(order.map(([inst], i) => [inst, i + 1] as const));
+  for (const row of ledger) {
+    if (row.playerId !== playerId) continue;
+    if (row.challengeInstanceId !== null) {
+      steps[stepOf.get(row.challengeInstanceId) ?? order.length]! += row.points;
+    } else {
+      // Manual adjustment: after the challenges finished before it.
+      const step = order.filter(([, at]) => at <= row.createdAt).length;
+      steps[step]! += row.points;
+    }
+  }
+  let running = 0;
+  return steps.map((delta) => round((running += delta)));
 }
 
 /** A "win" = highest positive module score in a challenge instance (ties all win). */
@@ -97,11 +137,11 @@ export function computeWins(
 }
 
 function computeAverageSubmissionSeconds(attempts: PersistedAttempt[], submissions: PersistedSubmission[]): Map<string, number> {
-  const startedAt = new Map(attempts.map((a) => [`${a.challengeInstanceId}:${a.playerId}`, a.startedAt] as const));
+  const startedAt = new Map(attempts.map((a) => [a.id, a.startedAt] as const));
   const sums = new Map<string, { total: number; n: number }>();
   for (const s of submissions) {
     if (s.supersededBy) continue;
-    const start = startedAt.get(`${s.challengeInstanceId}:${s.playerId}`);
+    const start = startedAt.get(s.attemptId);
     if (start == null) continue;
     const cur = sums.get(s.playerId) ?? { total: 0, n: 0 };
     cur.total += Math.max(0, (s.submittedAt - start) / 1000);

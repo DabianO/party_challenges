@@ -58,7 +58,9 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     ctx.schedule('lock', state.config.timeLimit, player.id);
-    return state;
+    // A replay starts without a photo.
+    const { [player.id]: _previous, ...photos } = state.photos;
+    return { ...state, photos };
   },
 
   validateInput(_state, _player, input) {

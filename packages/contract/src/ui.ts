@@ -229,6 +229,84 @@ export interface ButtonNode {
   disabled?: boolean;
 }
 
+/**
+ * A big tap target for rapid, repeated taps (e.g. pumping). Taps are counted on the device
+ * and sent as live actions (`onAction`) in batches: payload `{ [action]: tapsSinceLastBatch }`.
+ * Not a submission: nothing is evaluated per tap.
+ */
+export interface TapPadNode {
+  type: 'tap-pad';
+  /** Payload key the tap count is sent under. */
+  action: string;
+  label?: string;
+  sublabel?: string;
+  /** `#rrggbb`; anything else falls back to the accent colour. */
+  color?: string;
+  /** How often counted taps are sent, in ms (default 300). */
+  batchMs?: number;
+}
+
+/**
+ * A stopwatch timed on the player's device, so network delay plays no part in the result.
+ * The player taps Start, then Stop; both moments come from the touch events themselves
+ * (millisecond accuracy; browsers do not offer finer timing). Start sends the live action
+ * `{ [name]: 'start' }` (the module may note its own server time to check the result);
+ * Stop submits `{ [name]: elapsedMs }`, a whole number of milliseconds.
+ */
+export interface StopwatchNode {
+  type: 'stopwatch';
+  /** Payload key for the start action and the submitted time. */
+  name: string;
+  /** Hide the running time once this many seconds have passed (absent = always visible). */
+  hideAfterSeconds?: number;
+  startLabel?: string;
+  stopLabel?: string;
+}
+
+/** One player's territory in a `blob-field`. */
+export interface BlobSpec {
+  id: string;
+  /** The owner code used in `BlobFieldNode.cells` (see `blobCells`). */
+  slot: number;
+  /** `#rrggbb`. */
+  color: string;
+  label?: string;
+  /** Share of the field this blob holds (0..1). */
+  share: number;
+  /** Increases whenever the blob is pumped (animates a pulse). */
+  pulse?: number;
+}
+
+/**
+ * A field of liquid territories on a grid: every cell is empty or owned by one blob. The
+ * platform renders it as embossed liquid shapes (`live`, animating between updates) or as a
+ * gapless picture of who held which part of the field (`final`).
+ */
+export interface BlobFieldNode {
+  type: 'blob-field';
+  fieldId: string;
+  mode: 'live' | 'final';
+  cols: number;
+  rows: number;
+  /** Row-major, one character per cell: `blobCells.EMPTY` or `blobCells.encode(slot)`. */
+  cells: string;
+  blobs: BlobSpec[];
+}
+
+/** Encoding of `BlobFieldNode.cells`: compact ASCII for the first 78 slots, wider characters after. */
+export const blobCells = {
+  EMPTY: '.',
+  encode(slot: number): string {
+    return String.fromCharCode(slot < 78 ? 0x30 + slot : 0x100 + slot);
+  },
+  /** Slot of a cell character, or -1 for empty. */
+  decode(ch: string): number {
+    const c = ch.charCodeAt(0);
+    if (ch === '.' || Number.isNaN(c)) return -1;
+    return c >= 0x100 ? c - 0x100 : c - 0x30;
+  },
+};
+
 export type UINode =
   | StackNode
   | GridNode
@@ -251,7 +329,10 @@ export type UINode =
   | SliderInputNode
   | ToggleInputNode
   | FileInputNode
-  | ButtonNode;
+  | ButtonNode
+  | TapPadNode
+  | StopwatchNode
+  | BlobFieldNode;
 
 export type InputNode = ChoicesInputNode | NumberInputNode | TextInputNode | SliderInputNode | ToggleInputNode | FileInputNode;
 
@@ -383,5 +464,14 @@ export const ui = {
     label,
     action: 'submit',
     ...opts,
+  }),
+  tapPad: (action: string, opts: Omit<TapPadNode, 'type' | 'action'> = {}): TapPadNode => ({ type: 'tap-pad', action, ...opts }),
+  stopwatch: (name: string, opts: Omit<StopwatchNode, 'type' | 'name'> = {}): StopwatchNode => ({ type: 'stopwatch', name, ...opts }),
+  blobField: (fieldId: string, mode: BlobFieldNode['mode'], grid: { cols: number; rows: number; cells: string }, blobs: BlobSpec[]): BlobFieldNode => ({
+    type: 'blob-field',
+    fieldId,
+    mode,
+    ...grid,
+    blobs,
   }),
 };

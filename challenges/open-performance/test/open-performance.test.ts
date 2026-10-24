@@ -60,7 +60,7 @@ const submission = (playerId: string, text: unknown, judgements: Judgement[] = [
 describe('open-performance', () => {
   it('has a consistent v2 manifest with judging metadata', () => {
     expect(mod.manifest.id).toBe('open-performance');
-    expect(mod.manifest.version).toBe('2.0.0');
+    expect(mod.manifest.version).toBe('2.1.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.results).toBe('immediate');
     expect(mod.manifest.evaluation.mode).toBe('host');

@@ -4,9 +4,10 @@ import { AvailabilityBadge, EvaluationBadge, PhaseBadge } from '../../components
 import { SchemaForm, configSummary } from '../../components/SchemaForm';
 import { api, errorMessage } from '../../lib/api';
 import { GameSettingsForm } from './GameSettingsForm';
-import { InstanceOptionsFields, DEFAULT_OPTIONS, optionsOf } from './InstanceOptionsFields';
+import { BackupCard } from './BackupCard';
+import { InstanceOptionsFields, DEFAULT_OPTIONS, TitleField, categoriesOf, optionsOf } from './InstanceOptionsFields';
 import { Library } from './Library';
-import { moduleFor, type HostCtx } from './hostApi';
+import { moduleFor, subtitleOf, type HostCtx } from './hostApi';
 
 type Panel = { kind: 'none' } | { kind: 'library' } | { kind: 'add'; module: ModuleInfo } | { kind: 'edit'; instance: ChallengeInstanceSummary; module: ModuleInfo | undefined };
 
@@ -17,6 +18,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [options, setOptions] = useState<InstanceOptions>(DEFAULT_OPTIONS);
+  const categories = categoriesOf(challenges);
 
   const run = async (fn: () => Promise<unknown>, success?: string) => {
     setBusy(true);
@@ -52,7 +54,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   };
 
   const remove = (c: ChallengeInstanceSummary) => {
-    if (!window.confirm(`Remove "${c.moduleName}" from this game?`)) return;
+    if (!window.confirm(`Remove "${c.title}" from this game?`)) return;
     void run(() => api.removeChallenge(ctx.gameId, ctx.token, c.id), 'Challenge removed');
   };
 
@@ -82,7 +84,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
         <ol className="plain-list stack gap-sm">
           {challenges.map((c, i) => {
             const mod = moduleFor(modules, c.moduleId);
-            const title = c.title ?? configSummary(mod?.configurationSchema, c.configuration);
+            const summary = c.summary ?? configSummary(mod?.configurationSchema, c.configuration);
             const pending = c.phase === 'PENDING';
             return (
               <li key={c.id} className="card card-flat challenge-row">
@@ -91,14 +93,15 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
                 </span>
                 <div className="grow stack gap-xs">
                   <span className="row gap-sm align-center wrap">
-                    <strong>{c.moduleName}</strong>
-                    <span className="badge tone-muted">{c.moduleCategory}</span>
-                    <PhaseBadge phase={c.phase} />
+                    {c.category && <span className="badge tone-muted">{c.category}</span>}
+                    <strong>{c.title}</strong>
+                    <PhaseBadge phase={c.phase} availability={c.availability} started={game.startedAt !== null} />
                   </span>
-                  {title && <span className="muted small clamp">{title}</span>}
+                  {subtitleOf(c, summary) && <span className="muted small clamp">{subtitleOf(c, summary)}</span>}
                   <span className="row gap-xs wrap">
                     <AvailabilityBadge availability={c.availability} assignedCount={c.assignedPlayerIds?.length} />
                     <EvaluationBadge mode={c.evaluationMode} />
+                    {c.allowReplay && <span className="badge tone-primary">↻ Replays</span>}
                   </span>
                   {c.error && (
                     <span className="field-error" role="alert">
@@ -110,16 +113,16 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
                   <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => openEdit(c)}>
                     Edit
                   </button>
-                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.moduleName} up`} disabled={i === 0 || busy} onClick={() => move(i, -1)}>
+                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.title} up`} disabled={i === 0 || busy} onClick={() => move(i, -1)}>
                     ↑
                   </button>
-                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.moduleName} down`} disabled={i === challenges.length - 1 || busy} onClick={() => move(i, 1)}>
+                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.title} down`} disabled={i === challenges.length - 1 || busy} onClick={() => move(i, 1)}>
                     ↓
                   </button>
                   <button
                     type="button"
                     className="btn btn-icon btn-danger btn-ghost"
-                    aria-label={`Remove ${c.moduleName}`}
+                    aria-label={`Remove ${c.title}`}
                     disabled={!pending || busy}
                     title={!pending ? 'Only locked (not yet opened) challenges can be removed' : undefined}
                     onClick={() => remove(c)}
@@ -145,6 +148,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
             busy={busy}
             serverError={formError}
             upload={ctx.upload}
+            leading={<TitleField idPrefix="add" value={options} onChange={setOptions} module={panel.module} categories={categories} disabled={busy} />}
             extra={<InstanceOptionsFields idPrefix="add" value={options} onChange={setOptions} players={players} module={panel.module} disabled={busy} />}
             onCancel={() => {
               setFormError(null);
@@ -178,6 +182,8 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
       <section className="card stack gap-md">
         <GameSettingsForm key={`${game.name}|${JSON.stringify(game.settings)}|${JSON.stringify(game.branding)}`} ctx={ctx} />
       </section>
+
+      <BackupCard ctx={ctx} />
     </div>
   );
 }
@@ -214,8 +220,9 @@ function EditPanel({
   onSave: (body: { configuration?: Record<string, unknown> } & InstanceOptions) => Promise<void>;
 }) {
   const { players } = ctx.snapshot;
-  // The server only accepts configuration changes while the instance is PENDING and was never opened.
-  const configEditable = instance.phase === 'PENDING' && instance.stats.started === 0 && module !== undefined;
+  // The server accepts configuration changes while nobody has played it (never opened, or reset).
+  const unplayed = instance.stats.attempts === 0 && (instance.phase === 'PENDING' || instance.phase === 'ACTIVE');
+  const configEditable = unplayed && module !== undefined;
 
   if (configEditable) {
     return (
@@ -229,6 +236,7 @@ function EditPanel({
           busy={busy}
           serverError={error}
           upload={ctx.upload}
+          leading={<TitleField idPrefix="edit" value={options} onChange={setOptions} module={module} categories={categoriesOf(ctx.snapshot.challenges)} disabled={busy} />}
           extra={<InstanceOptionsFields idPrefix="edit" value={options} onChange={setOptions} players={players} module={module} disabled={busy} />}
           onCancel={onCancel}
           onSubmit={(configuration) => onSave({ configuration, ...options })}
@@ -247,10 +255,11 @@ function EditPanel({
       <p className="field-help">
         {module === undefined
           ? 'This module is not installed on the server any more, so its configuration cannot be edited.'
-          : 'The configuration is locked because this challenge has already been opened. You can still change who may start it and who evaluates it.'}
+          : 'The configuration is locked because players have already played this challenge. You can still change its title, category, who may start it and who evaluates it. To change everything, reset it in the Run tab first (their attempts are discarded and points from it are reversed).'}
       </p>
-      {instance.title && <p className="muted small">Current: {instance.title}</p>}
+      {instance.summary && <p className="muted small">Current: {instance.summary}</p>}
       <form className="stack gap-md" onSubmit={submit}>
+        <TitleField idPrefix="edit" value={options} onChange={setOptions} module={module} categories={categoriesOf(ctx.snapshot.challenges)} disabled={busy} />
         <InstanceOptionsFields idPrefix="edit" value={options} onChange={setOptions} players={players} module={module} disabled={busy} />
         {error && (
           <p className="form-error" role="alert">

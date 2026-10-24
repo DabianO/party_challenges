@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "points": {
+      "type": "integer",
+      "title": "Points for the biggest blob",
+      "description": "Everyone else scores in proportion to their share of the room.",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    },
+    "tapsToMax": {
+      "type": "integer",
+      "title": "Taps to reach full size",
+      "minimum": 10,
+      "maximum": 5000,
+      "default": 150
+    },
+    "maxShare": {
+      "type": "number",
+      "title": "Largest share of the room one blob may fill",
+      "description": "Between 0.05 (5%) and 0.5 (50%), so nobody can take over the whole screen. A newcomer clears a circle this big around their blob.",
+      "minimum": 0.05,
+      "maximum": 0.5,
+      "default": 0.2
+    }
+  }
+}

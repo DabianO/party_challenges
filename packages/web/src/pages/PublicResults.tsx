@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Leaderboard } from '../components/Leaderboard';
+import { ProgressChart } from '../components/ProgressChart';
 import { EvaluationBadge, PhaseBadge, StatusBadge } from '../components/PhaseBadge';
 import { UIView } from '../components/UIRenderer';
 import { api, errorMessage, type PublicResultsResponse } from '../lib/api';
@@ -65,7 +66,14 @@ export function PublicResults() {
 
       <section className="stack gap-sm">
         <h2 className="section-title">Leaderboard</h2>
-        <Leaderboard entries={leaderboard} showDelta={false} showConnection={false} showCompleted />
+        {game.resultsRevealed ? (
+          <>
+            <Leaderboard entries={leaderboard} showDelta={false} showConnection={false} showCompleted />
+            <ProgressChart entries={leaderboard} playerOrder={players.map((p) => p.id)} challengeCount={challenges.length} />
+          </>
+        ) : (
+          <p className="muted">The host has not revealed the results yet.</p>
+        )}
       </section>
 
       <section className="stack gap-sm">
@@ -78,7 +86,7 @@ export function PublicResults() {
                 <div className="row gap-sm align-center wrap">
                   <span className="mono muted">{i + 1}</span>
                   <span className="grow stack gap-xs">
-                    <strong>{c.availability === 'assigned' ? 'Secret challenge' : c.moduleName}</strong>
+                    <strong>{c.availability === 'assigned' ? 'Secret challenge' : c.title}</strong>
                     <span className="row gap-xs wrap">
                       <span className="badge tone-muted">{c.moduleCategory}</span>
                       <EvaluationBadge mode={c.evaluationMode} short />

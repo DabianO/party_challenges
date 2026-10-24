@@ -77,7 +77,17 @@ export interface Manifest {
   results: ResultsTiming;
   /** FR-28: `none` = one submission per attempt; `replace` lets the player change it until the attempt locks. */
   resubmission?: 'none' | 'replace';
+  /**
+   * `once` (default): one attempt per player, unless the host enables replays (best attempt counts).
+   * `repeat`: taking part repeatedly is the challenge itself — players may always start a
+   * new attempt (gate turns with `canStart`) and the points of all attempts add up.
+   * `immediate` results only.
+   */
+  attempts?: 'once' | 'repeat';
 }
+
+/** A module's say on whether a player may start an attempt right now (see `canStart`). */
+export type StartCheck = { ok: true; hint?: string } | { ok: false; reason: string };
 
 /**
  * Challenge instance lifecycle (engine-owned):
@@ -214,8 +224,24 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   /** Called when a timer fires (`playerId` set for attempt-scoped timers). */
   onTimer?(state: State, tag: string, ctx: InstanceContext, playerId?: string): State;
 
+  /**
+   * Called when a new player joins the game while this instance is ACTIVE (players already
+   * present when it opens are in `ctx.players()` at `onPhaseChange('ACTIVE')`).
+   */
+  onPlayerJoin?(state: State, player: PlayerRef, ctx: InstanceContext): State;
+
   // Attempt lifecycle (per player) ----------------------------------------
-  /** Called when a player starts the challenge. Schedule the time limit here: `ctx.schedule('lock', s, player.id)`. */
+  /**
+   * Optional extra gate on top of the engine's availability rules, e.g. turn-taking ("it is
+   * Bea's turn"). `{ ok: false, reason }` shows the player a waiting tile with `reason`;
+   * `{ ok: true, hint }` shows `hint` on their playable tile. Called often: keep it pure and cheap.
+   */
+  canStart?(state: State, player: PlayerRef, ctx: InstanceContext): StartCheck;
+  /**
+   * Called when a player starts the challenge. Schedule the time limit here: `ctx.schedule('lock', s, player.id)`.
+   * When the host allows replays this runs again for the same player on every new attempt:
+   * clear that player's per-attempt data here so the new attempt starts fresh.
+   */
   onAttemptStart?(state: State, player: PlayerRef, ctx: InstanceContext): State;
   /** Called when a player's attempt locks (submitted, finished, timed out, or instance closed). */
   onAttemptLocked?(state: State, player: PlayerRef, ctx: InstanceContext): State;
@@ -224,6 +250,15 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   validateInput(state: State, player: PlayerRef, input: Input, ctx: InstanceContext): ValidationResult;
   handleInput(state: State, player: PlayerRef, input: Input, ctx: InstanceContext): State;
 
+  /**
+   * Live actions: rapid input that is *not* a submission (e.g. taps from a `tap-pad`).
+   * Only accepted from a player with an attempt in progress while the instance is ACTIVE.
+   * Actions change state but are not stored or evaluated one by one; the engine throttles
+   * the snapshots they cause. Implement both or neither.
+   */
+  validateAction?(state: State, player: PlayerRef, payload: unknown, ctx: InstanceContext): ValidationResult;
+  onAction?(state: State, player: PlayerRef, payload: unknown, ctx: InstanceContext): State;
+
   // Evaluation -------------------------------------------------------------
   /**
    * `immediate`: called once per locked attempt with exactly one submission (carrying any
@@ -231,7 +266,10 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
    */
   evaluate(state: State, submissions: Submission<Input>[], ctx: InstanceContext): Evaluation;
   calculateScores(state: State, evaluation: Evaluation, ctx: InstanceContext): ScoreAward[];
-  /** Module statistics over all evaluations so far (`onClose`: exactly one). */
+  /**
+   * Module statistics over all evaluations so far (`onClose`: exactly one). With replays,
+   * `getStatistics` and `resultsView` receive only each player's best attempt.
+   */
   getStatistics(state: State, evaluations: Evaluation[], ctx: InstanceContext): Statistics;
   /** onClose + host resolution only. */
   hostResolutionView?(state: State, evaluation: Evaluation, ctx: InstanceContext): HostResolutionViewModel;
@@ -240,12 +278,24 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   // Presentation -----------------------------------------------------------
   /** Instructions shown before the player presses Start. Falls back to the manifest description. */
   introView?(state: State, player: PlayerRef, ctx: InstanceContext): UINode;
+  /**
+   * Short personal feedback for the player's tile and lock-in message, shown even while
+   * the host keeps results hidden (e.g. "312 ms · best 287 ms" so players can improve).
+   * It bypasses the hidden-results rule: share only what is meant to be seen right away.
+   */
+  playerNote?(state: State, player: PlayerRef, ctx: InstanceContext): string | null;
   /** The player's live attempt screen. */
   guestView(state: State, player: PlayerRef, ctx: InstanceContext): GuestViewModel;
   /** How a submission is shown to judges (peer or host). Falls back to a generic evidence view. */
   presentSubmission?(state: State, submission: Submission<Input>, ctx: InstanceContext): UINode;
   /** Optional public card content for the main display (must not leak answers, MR-9). */
   mainView?(state: State, ctx: InstanceContext): UINode;
+  /**
+   * Optional live panel for the big screen, shown next to the race graph while the instance
+   * is open and as the closing picture once it is closed or the game ended (e.g. a
+   * `blob-field`). Everyone in the room sees it: must not leak answers (MR-9).
+   */
+  displayPanel?(state: State, ctx: InstanceContext): UINode;
   /** Results over all evaluations so far; `guestUi` personalises them. */
   resultsView(state: State, evaluations: Evaluation[], ctx: InstanceContext): ResultsViewModel;
 }

@@ -20,7 +20,7 @@ import type {
 import type { ActivityItem, ScoreLedgerEntry } from '@challenge/contract';
 
 /** Bump when the tables change; add a migration step in SqliteRepository.migrate(). */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS games (
@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS games (
   finished_at INTEGER,
   paused INTEGER NOT NULL DEFAULT 0,
   seq INTEGER NOT NULL DEFAULT 0,
-  activity TEXT NOT NULL DEFAULT '[]'
+  activity TEXT NOT NULL DEFAULT '[]',
+  results_revealed INTEGER NOT NULL DEFAULT 0,
+  standings TEXT,
+  standings_feed TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS games_code ON games(code);
 
@@ -57,6 +60,9 @@ CREATE TABLE IF NOT EXISTS challenge_instances (
   module_id TEXT NOT NULL,
   module_version TEXT NOT NULL,
   sort_order INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  allow_replay INTEGER NOT NULL DEFAULT 0,
   configuration TEXT NOT NULL,
   module_state TEXT,
   phase TEXT NOT NULL,
@@ -90,6 +96,7 @@ CREATE TABLE IF NOT EXISTS submissions (
   game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
   challenge_instance_id TEXT NOT NULL,
   player_id TEXT NOT NULL,
+  attempt_id TEXT,
   payload TEXT NOT NULL,
   submitted_at INTEGER NOT NULL,
   superseded_by TEXT,
@@ -142,6 +149,30 @@ CREATE TABLE IF NOT EXISTS media_assets (
 );
 `;
 
+/** v2 → v3: challenge titles, replays, the results reveal and submission → attempt links. */
+const MIGRATE_TO_V3 = `
+  ALTER TABLE games ADD COLUMN results_revealed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE challenge_instances ADD COLUMN title TEXT NOT NULL DEFAULT '';
+  ALTER TABLE challenge_instances ADD COLUMN allow_replay INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE submissions ADD COLUMN attempt_id TEXT;
+  UPDATE submissions SET attempt_id = (
+    SELECT a.id FROM attempts a
+    WHERE a.game_id = submissions.game_id AND a.challenge_instance_id = submissions.challenge_instance_id AND a.player_id = submissions.player_id
+    ORDER BY a.started_at DESC LIMIT 1
+  );
+`;
+
+/** v3 → v4: standings published to the big screen and their change feed. */
+const MIGRATE_TO_V4 = `
+  ALTER TABLE games ADD COLUMN standings TEXT;
+  ALTER TABLE games ADD COLUMN standings_feed TEXT NOT NULL DEFAULT '[]';
+`;
+
+/** v4 → v5: challenge categories (players' boards group by them). */
+const MIGRATE_TO_V5 = `
+  ALTER TABLE challenge_instances ADD COLUMN category TEXT NOT NULL DEFAULT '';
+`;
+
 type Row = Record<string, unknown>;
 
 const json = (v: unknown): string => JSON.stringify(v ?? null);
@@ -182,17 +213,32 @@ export class SqliteRepository implements Repository {
    * Schema versioning via SQLite's user_version. Version 1 was the sequential game model
    * (contract v1); its games cannot run on the board engine (different tables, module
    * versions no longer installed), so a legacy database is backed up and rebuilt.
+   * Versions 2 to 4 are upgraded in place (MIGRATE_TO_V3 … MIGRATE_TO_V5).
    */
   private migrate(path: string): void {
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
     if (version === SCHEMA_VERSION) return;
     const hasTables = (this.db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'games'").get() as { n: number }).n > 0;
+    if (version >= 2 && version < SCHEMA_VERSION && hasTables) {
+      // Upgrade in place, one step at a time, inside one transaction.
+      this.backup(path, `v${version}`);
+      this.db.exec('BEGIN');
+      try {
+        if (version <= 2) this.db.exec(MIGRATE_TO_V3);
+        if (version <= 3) this.db.exec(MIGRATE_TO_V4);
+        this.db.exec(MIGRATE_TO_V5);
+        this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+        this.db.exec('COMMIT');
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+      return;
+    }
     if (version === 0 && hasTables) {
+      this.backup(path, 'v1');
       if (path !== ':memory:') {
-        const backup = `${path}.v1-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-        copyFileSync(path, backup);
-        console.warn(`[sqlite] legacy database detected: backed up to ${backup} and rebuilt for schema v${SCHEMA_VERSION}. Old games were not migrated.`);
+        console.warn(`[sqlite] legacy database detected and rebuilt for schema v${SCHEMA_VERSION}. Old games were not migrated.`);
       }
       const tables = (this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((t) => t.name);
       this.db.exec('PRAGMA foreign_keys = OFF');
@@ -203,16 +249,27 @@ export class SqliteRepository implements Repository {
     this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 
+  /** Copy the database file aside before a migration touches it. */
+  private backup(path: string, label: string): void {
+    if (path === ':memory:') return;
+    const target = `${path}.${label}-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    copyFileSync(path, target);
+    console.warn(`[sqlite] migrating to schema v${SCHEMA_VERSION}; previous database backed up to ${target}`);
+  }
+
   saveGame(game: PersistedGame): void {
     const db = this.db;
     db.exec('BEGIN');
     try {
       db.prepare(
-        `INSERT INTO games (id, name, code, host_token_hash, status, settings, branding, created_at, started_at, finished_at, paused, seq, activity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO games (id, name, code, host_token_hash, status, settings, branding, created_at, started_at, finished_at, paused, seq, activity, results_revealed,
+           standings, standings_feed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET name=excluded.name, code=excluded.code, host_token_hash=excluded.host_token_hash, status=excluded.status,
            settings=excluded.settings, branding=excluded.branding, started_at=excluded.started_at, finished_at=excluded.finished_at,
-           paused=excluded.paused, seq=excluded.seq, activity=excluded.activity`,
+           paused=excluded.paused, seq=excluded.seq, activity=excluded.activity, results_revealed=excluded.results_revealed,
+           standings=excluded.standings, standings_feed=excluded.standings_feed`,
       ).run(
         game.id,
         game.name,
@@ -227,6 +284,9 @@ export class SqliteRepository implements Repository {
         game.paused ? 1 : 0,
         game.seq,
         json(game.activity ?? []),
+        game.resultsRevealed ? 1 : 0,
+        json(game.standings ?? null),
+        json(game.standingsFeed ?? []),
       );
 
       // Children: replace wholesale (documents are small; correctness over cleverness).
@@ -240,9 +300,9 @@ export class SqliteRepository implements Repository {
         insPlayer.run(p.id, game.id, p.displayName, p.sessionTokenHash, p.joinedAt, p.removedAt, p.reclaimable ? 1 : 0);
       }
       const insInst = db.prepare(
-        `INSERT INTO challenge_instances (id, game_id, module_id, module_version, sort_order, configuration, module_state, phase, availability,
+        `INSERT INTO challenge_instances (id, game_id, module_id, module_version, sort_order, title, category, allow_replay, configuration, module_state, phase, availability,
            assigned_player_ids, evaluation_mode, seed, created_at, opened_at, closed_at, timers, evaluation, results, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const i of game.instances) {
         insInst.run(
@@ -251,6 +311,9 @@ export class SqliteRepository implements Repository {
           i.moduleId,
           i.moduleVersion,
           i.sortOrder,
+          i.title ?? '',
+          i.category ?? '',
+          i.allowReplay ? 1 : 0,
           json(i.configuration),
           json(i.moduleState),
           i.phase,
@@ -272,10 +335,11 @@ export class SqliteRepository implements Repository {
       );
       for (const a of game.attempts) insAttempt.run(a.id, game.id, a.challengeInstanceId, a.playerId, a.startedAt, a.lockedAt, a.status);
       const insSub = db.prepare(
-        `INSERT INTO submissions (id, game_id, challenge_instance_id, player_id, payload, submitted_at, superseded_by, evaluation, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO submissions (id, game_id, challenge_instance_id, player_id, attempt_id, payload, submitted_at, superseded_by, evaluation, scored_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const s of game.submissions) {
-        insSub.run(s.id, game.id, s.challengeInstanceId, s.playerId, json(s.payload), s.submittedAt, s.supersededBy, json(s.evaluation), s.scoredAt);
+        insSub.run(s.id, game.id, s.challengeInstanceId, s.playerId, s.attemptId, json(s.payload), s.submittedAt, s.supersededBy, json(s.evaluation), s.scoredAt);
       }
       const insAssign = db.prepare(
         `INSERT INTO evaluation_assignments (id, game_id, challenge_instance_id, submission_id, judge_player_id, status, reason, assigned_at, deadline_at,
@@ -338,6 +402,9 @@ export class SqliteRepository implements Repository {
         moduleId: String(i.module_id),
         moduleVersion: String(i.module_version),
         sortOrder: Number(i.sort_order),
+        title: String(i.title ?? ''),
+        category: String(i.category ?? ''),
+        allowReplay: Boolean(i.allow_replay),
         configuration: parse(i.configuration, {}),
         moduleState: parse(i.module_state, null),
         phase: i.phase as PersistedInstance['phase'],
@@ -369,6 +436,7 @@ export class SqliteRepository implements Repository {
         id: String(s.id),
         challengeInstanceId: String(s.challenge_instance_id),
         playerId: String(s.player_id),
+        attemptId: str(s.attempt_id) ?? '',
         payload: parse(s.payload, null),
         submittedAt: Number(s.submitted_at),
         supersededBy: str(s.superseded_by),
@@ -418,6 +486,9 @@ export class SqliteRepository implements Repository {
       startedAt: num(g.started_at),
       finishedAt: num(g.finished_at),
       paused: Boolean(g.paused),
+      resultsRevealed: Boolean(g.results_revealed),
+      standings: parse(g.standings, null),
+      standingsFeed: parse(g.standings_feed, []),
       seq: Number(g.seq),
       players,
       instances,

@@ -1,0 +1,14 @@
+{
+  "id": "stop-the-clock",
+  "name": "Stop the Clock",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "skill",
+  "description": "Start a stopwatch and stop it at exactly the target time, e.g. 35 seconds. The clock disappears after a few seconds, so count in your head. Timed on your phone to the millisecond.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 60 },
+  "capabilities": ["timer", "real-time-burst", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

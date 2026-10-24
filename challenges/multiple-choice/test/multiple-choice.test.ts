@@ -50,7 +50,7 @@ const sub = (playerId: string, answer: unknown, startedAt: number, elapsedMs: nu
 describe('multiple-choice', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('multiple-choice');
-    expect(mod.manifest.version).toBe('2.0.0');
+    expect(mod.manifest.version).toBe('2.1.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -81,6 +81,17 @@ describe('multiple-choice', () => {
     expect(mod.validateInput(state, alice, { answer: 'A' }, ctx)).toMatchObject({ ok: false, reason: /already/ });
     // Other players are unaffected by Alice's pick.
     expect(mod.validateInput(state, players[1]!, { answer: 'A' }, ctx)).toEqual({ ok: true });
+  });
+
+  it('lets a replayed attempt answer again without touching other players', () => {
+    const { ctx } = fakeCtx();
+    const [alice, bob] = [players[0]!, players[1]!];
+    let state = mod.onAttemptStart!(mod.createInstance(config, ctx), alice, ctx);
+    state = mod.handleInput(state, alice, { answer: 'A' }, ctx);
+    state = mod.handleInput(state, bob, { answer: 'C' }, ctx);
+    state = mod.onAttemptStart!(state, alice, ctx);
+    expect(state.picks).toEqual({ p2: 'C' });
+    expect(mod.validateInput(state, alice, { answer: 'B' }, ctx)).toEqual({ ok: true });
   });
 
   it('evaluates each submission on its own, scores with a speed bonus and aggregates statistics', () => {

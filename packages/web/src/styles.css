@@ -413,6 +413,17 @@ textarea {
 .field-compact {
   min-width: 120px;
 }
+/* Title and category side by side; stacked on a phone. */
+.title-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+@media (max-width: 600px) {
+  .title-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .field-label {
   font-weight: 600;
   font-size: 0.95rem;
@@ -2146,64 +2157,379 @@ details[open] > summary::before {
   filter: brightness(1.08);
 }
 
-.board {
-  display: flex;
-  flex-direction: column;
+/* Player board: one big tap target per challenge ------------------------- */
+.board-group + .board-group {
+  margin-top: 8px;
+}
+.board-group-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px;
 }
-.board-card {
+.tile {
+  width: 100%;
+  min-height: 116px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 14px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 2px solid var(--border);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition:
+    transform 0.1s ease,
+    border-color 0.15s ease;
+}
+.tile:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.tile:focus-visible {
+  outline: 3px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.tile.is-playable {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+.tile.status-in_progress {
+  border-color: var(--warning-text);
+  background: color-mix(in srgb, var(--warning) 18%, var(--surface));
+}
+.tile.is-inert,
+.tile:disabled {
+  cursor: default;
+  box-shadow: none;
+}
+.tile.status-waiting {
+  border-style: dashed;
+}
+.tile.status-locked,
+.tile.status-closed {
+  opacity: 0.6;
+}
+.tile-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.tile-sub {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.tile-state {
+  margin-top: auto;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.tile-note {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.tile.is-playable .tile-state {
+  color: var(--accent-text);
+}
+.tile.status-in_progress .tile-state {
+  color: var(--warning-text);
+}
+.tile.status-scored .tile-state {
+  color: var(--success-text);
+}
+
+/* Main display: progress while results are hidden ------------------------ */
+.progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 14px;
-  border-radius: var(--radius);
+  width: 100%;
+}
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-}
-.board-card.status-in_progress {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-}
-.board-card.status-available {
-  border-color: color-mix(in srgb, var(--success) 60%, var(--border));
-}
-.board-card.status-locked,
-.board-card.status-closed,
-.board-card.status-missed {
-  opacity: 0.8;
-  box-shadow: none;
-}
-.board-card-head {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.board-card-title {
   font-size: 1.15rem;
+}
+.progress-name {
+  flex: 1;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progress-count {
   font-weight: 800;
 }
-.board-card-desc {
-  color: var(--text-muted);
-  font-size: 0.92rem;
+
+/* Progress chart ---------------------------------------------------------
+   Categorical slots validated (dataviz validator) against both surfaces: dark steps
+   on #181c2e/#0f1220, light steps on #ffffff (3 light slots < 3:1, so lines carry
+   direct labels and the leaderboard is the table view). Order is fixed, never cycled. */
+.viz-root {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --viz-other: #6b7090;
+  --viz-grid: rgba(255, 255, 255, 0.08);
+  --viz-axis: rgba(255, 255, 255, 0.22);
 }
-.board-card-meta {
+:root[data-theme='light'] .viz-root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --viz-other: #a3a7bd;
+  --viz-grid: rgba(20, 22, 43, 0.08);
+  --viz-axis: rgba(20, 22, 43, 0.25);
+}
+.progress-chart {
+  position: relative;
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+}
+.progress-chart svg {
+  display: block;
+  overflow: visible;
+  touch-action: pan-y;
+}
+.progress-chart svg:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.viz-legend {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.viz-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.viz-legend li.is-me {
+  color: var(--text);
+  font-weight: 700;
+}
+.viz-key {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+.viz-key-other {
+  background: var(--viz-other);
+}
+.viz-grid {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+.viz-axis {
+  stroke: var(--viz-axis);
+  stroke-width: 1;
+}
+.viz-tick,
+.viz-axis-title {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font);
+}
+.viz-axis-title {
+  font-size: 12px;
+}
+.viz-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.viz-line.is-me {
+  stroke-width: 3;
+}
+.viz-line-other {
+  stroke: var(--viz-other);
+  stroke-width: 1.5;
+  opacity: 0.55;
+}
+.viz-end {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.viz-connector {
+  stroke: var(--viz-axis);
+  stroke-width: 1;
+}
+.viz-label {
+  font-size: 12px;
+  font-family: var(--font);
+}
+.viz-label-name {
+  fill: var(--text);
+  font-weight: 700;
+}
+.viz-label-value {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+}
+.viz-crosshair {
+  stroke: var(--viz-axis);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.viz-tooltip {
+  position: absolute;
+  top: 40px;
+  z-index: 5;
+  min-width: 150px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+.viz-tooltip-head {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+.viz-tooltip-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+.viz-tooltip-row strong {
+  font-family: var(--mono);
+  min-width: 2.5em;
+  text-align: right;
+}
+.progress-chart-fill {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.viz-label-rank {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+/* Each update replays the race: lines draw in, then end markers and labels appear. */
+.is-animated .viz-line:not(.viz-line-other) {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: viz-draw 1.6s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}
+.is-animated .viz-end,
+.is-animated .viz-label,
+.is-animated .viz-connector {
+  opacity: 0;
+  animation: viz-fade 0.5s ease-out 1.4s forwards;
+}
+@keyframes viz-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes viz-fade {
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-animated .viz-line:not(.viz-line-other),
+  .is-animated .viz-end,
+  .is-animated .viz-label,
+  .is-animated .viz-connector {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+.progress-chart-lg .viz-line {
+  stroke-width: 3;
+}
+.progress-chart-lg .viz-end {
+  r: 6px;
+}
+.progress-chart-lg .viz-label {
+  font-size: 20px;
+}
+.progress-chart-lg .viz-tick {
+  font-size: 15px;
+}
+.progress-chart-lg .viz-axis-title {
+  font-size: 16px;
+}
+.progress-chart-lg .viz-legend {
+  font-size: 1rem;
+}
+
+/* Host: reveal results -------------------------------------------------- */
+.reveal-panel {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
-.board-card-timer {
+.screen-panel {
   display: flex;
-  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
 }
-.board-card-action {
-  display: flex;
+.reveal-panel.is-revealed {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--success) 70%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
 }
-.board-card-action .btn {
-  flex: 1;
-}
+
 .points-badge {
   display: inline-flex;
   align-items: center;
@@ -2261,10 +2587,6 @@ body.has-bg-image .challenge-top {
 }
 .challenge-top .countdown-bar {
   min-width: 72px;
-}
-.intro-facts .small-dd {
-  font-size: 0.95rem;
-  font-family: var(--font);
 }
 
 .criteria {
@@ -2485,128 +2807,311 @@ body.has-bg-image .challenge-top {
 .display-host {
   font-size: clamp(0.8rem, 1.1vw, 1rem);
 }
-.dash {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr) minmax(260px, 1fr);
-  gap: 24px;
-  align-items: start;
-}
-.dash-col {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-  background: color-mix(in srgb, var(--surface) 75%, transparent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-}
-.dash-leaderboard .lb-row {
-  padding: 10px 12px;
-}
 .lb-completed {
   font-family: var(--mono);
   font-size: 0.85em;
   white-space: nowrap;
 }
-.dash-cards {
+
+/* The race (big screen during the game) ----------------------------------- */
+.race {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  /* Header and paddings take the rest: the chart fills the screen without scrolling. */
+  height: calc(100dvh - 150px);
 }
-.dash-card {
+.race-main {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  gap: 12px;
   min-width: 0;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
 }
-.dash-card.phase-ACTIVE {
-  border-color: var(--success);
-}
-.dash-card.phase-RESULTS {
-  border-color: var(--accent);
-}
-.dash-card.phase-PENDING,
-.dash-card.is-secret {
-  opacity: 0.75;
-}
-.dash-card-head {
+.race-head {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
-.dash-card-title {
-  font-size: clamp(1.05rem, 1.6vw, 1.5rem);
-  font-weight: 800;
-  overflow-wrap: anywhere;
-}
-.dash-card-desc {
+.race-updated {
   font-size: clamp(0.85rem, 1.1vw, 1.05rem);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+}
+.race-chart {
+  flex: 1;
+  min-height: 0;
+}
+.race-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+}
+.race-empty-icon {
+  font-size: clamp(3rem, 7vw, 6rem);
+}
+/* With a live panel (Blob War) the screen splits in half: the chart left, the panels right. */
+.race-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+.race.has-panels {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.race-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+/* A narrow window (not a beamer): stack the chart and the panels. */
+@media (max-width: 900px) {
+  .race,
+  .race.has-panels {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .race-main {
+    min-height: 60vh;
+  }
+  .race-panel {
+    min-height: 45vh;
+  }
+}
+.race-panel-body,
+.artwork-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.race-panel-body > .ui-root,
+.artwork-body > .ui-root {
+  height: 100%;
+}
+.blob-field {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
-.dash-card-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: auto;
+/* Out of the flow, so the canvas can never resize the frame it measures. */
+.blob-field canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
 }
-.dash-stats {
-  display: inline-flex;
-  gap: 10px;
-  font-size: clamp(0.85rem, 1.1vw, 1.05rem);
-  font-weight: 700;
+/* The closing picture fades in. */
+.blob-field.final canvas {
+  animation: final-in 1.2s ease-out both;
 }
-.dash-points {
-  display: flex;
-  gap: 12px;
-  font-size: 0.85em;
+@keyframes final-in {
+  from {
+    opacity: 0.2;
+    filter: saturate(0.4) brightness(0.7);
+  }
 }
-.dash-card-results {
-  color: var(--accent-text);
-  font-weight: 700;
-  font-size: 0.9em;
-}
-.spotlight {
-  margin-top: 8px;
-  padding: 18px;
-  border-radius: var(--radius);
-  border: 2px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+.artwork {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  animation: pop-in 0.3s ease-out;
+  gap: 10px;
 }
-.spotlight-head {
+.artwork-body {
+  /* Same shape as the territory grid (112 × 70), so the window fills the frame. */
+  width: min(100%, calc(72vh * 1.6));
+  aspect-ratio: 16 / 10;
+  margin: 0 auto;
+  flex: none;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  border-radius: var(--radius-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .blob-field.final canvas {
+    animation: none;
+  }
+}
+
+/* Phone pump (tap-pad) ----------------------------------------------------- */
+.tap-pad-wrap {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
 }
-.spotlight-dots {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-.spotlight-dot {
-  width: 10px;
-  height: 10px;
+.tap-pad {
+  --pad-color: var(--accent);
+  position: relative;
+  overflow: hidden;
+  width: min(78vw, 340px);
+  aspect-ratio: 1;
   border-radius: 50%;
-  background: var(--border);
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.55), transparent 42%),
+    radial-gradient(circle at 50% 55%, var(--pad-color), color-mix(in srgb, var(--pad-color) 55%, #000) 100%);
+  box-shadow:
+    0 14px 40px color-mix(in srgb, var(--pad-color) 45%, transparent),
+    inset 0 -10px 24px rgba(0, 0, 0, 0.25);
+  transition: transform 0.07s ease-out;
 }
-.spotlight-dot.is-active {
-  background: var(--accent);
+.tap-pad:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.tap-pad:disabled {
+  filter: grayscale(0.6);
+  opacity: 0.6;
+  cursor: default;
+}
+.tap-pad:focus-visible {
+  outline: 4px solid var(--accent-text);
+  outline-offset: 4px;
+}
+.tap-pad-label {
+  font-size: clamp(2rem, 11vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.tap-pad-sub {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1rem;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.tap-pad-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 6px solid rgba(255, 255, 255, 0.6);
+  animation: pad-ripple 0.6s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes pad-ripple {
+  from {
+    transform: scale(0.55);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.05);
+    opacity: 0;
+  }
+}
+.tap-pad-count {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+/* Content this (older) page cannot show: offer a reload. */
+.ui-outdated {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+/* Phone stopwatch (timed on the device) ------------------------------------ */
+.stopwatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.stopwatch-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 7.5rem;
+  justify-content: center;
+}
+.stopwatch-digits {
+  font-family: var(--mono);
+  font-size: clamp(3.2rem, 17vw, 5rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.stopwatch.is-hidden .stopwatch-digits {
+  color: var(--text-muted);
+  filter: blur(1px);
+}
+.stopwatch.is-stopped .stopwatch-digits {
+  color: var(--accent-text);
+}
+.stopwatch-caption {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  text-align: center;
+}
+.stopwatch-btn {
+  width: min(70vw, 300px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: none;
+  font: inherit;
+  font-size: clamp(2rem, 10vw, 3rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3), inset 0 -10px 24px rgba(0, 0, 0, 0.25);
+  transition: transform 0.07s ease-out;
+}
+.stopwatch-btn.is-start {
+  background: radial-gradient(circle at 50% 40%, var(--success), color-mix(in srgb, var(--success) 55%, #000));
+}
+.stopwatch-btn.is-stop {
+  background: radial-gradient(circle at 50% 40%, var(--danger), color-mix(in srgb, var(--danger) 55%, #000));
+}
+.stopwatch-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.stopwatch-btn:disabled {
+  filter: grayscale(0.6);
+  opacity: 0.6;
+  cursor: default;
+}
+.stopwatch-btn:focus-visible {
+  outline: 4px solid var(--accent-text);
+  outline-offset: 4px;
 }
 .ui-display-compact .ui-text-display {
   font-size: clamp(1.8rem, 4vw, 3.5rem);
@@ -2705,18 +3210,15 @@ body.has-bg-image .challenge-top {
 }
 
 @media (max-width: 1100px) {
-  .dash {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  .race {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
   }
-  .dash-board {
-    grid-column: 1 / -1;
-    order: -1;
+  .race-chart {
+    height: 60vh;
   }
 }
 @media (max-width: 700px) {
-  .dash {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .display-header {
     flex-wrap: wrap;
   }

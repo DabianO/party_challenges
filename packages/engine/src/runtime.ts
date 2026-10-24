@@ -14,6 +14,7 @@ import type {
   GameEvent,
   GameEventType,
   GameSettings,
+  GameSetup,
   GameSnapshot,
   GameSummary,
   HostAction,
@@ -22,19 +23,23 @@ import type {
   InstanceOptions,
   JudgeTask,
   Judgement,
+  LeaderboardEntry,
   PlayerPublic,
   PlayerRef,
+  PublishedStanding,
   ScoreAward,
   ScoredSubmissionSummary,
   ScoreLedgerEntry,
+  StartCheck,
   Submission,
   TimerInfo,
   UINode,
 } from '@challenge/contract';
-import { DEFAULT_SETTINGS, ui } from '@challenge/contract';
+import { DEFAULT_SETTINGS, SETUP_FORMAT, SETUP_VERSION, ui } from '@challenge/contract';
 import { EngineError, invalidState, notFound, validationError } from './errors.ts';
 import { createSeededRng, generateGameCode, hashToken, newId, newToken, randomSeed } from './ids.ts';
 import { computeLeaderboard } from './leaderboard.ts';
+import { STANDINGS_FEED_LIMIT, diffStandings } from './standings.ts';
 import type {
   PersistedAssignment,
   PersistedAttempt,
@@ -65,6 +70,11 @@ export interface RuntimeDeps {
   mediaUrl: (ref: string) => string;
   /** Non-deterministic randomness for engine decisions (judge selection). */
   random?: () => number;
+  /**
+   * A code this game may use when it becomes joinable again (`reopen-game`): `current`
+   * when no other live game took it meanwhile, otherwise a fresh one. Absent: keep it.
+   */
+  reclaimCode?: (current: string, gameId: string) => string;
 }
 
 export interface HostActionResult {
@@ -76,6 +86,13 @@ export type PlayerResult = { ok: true } | { ok: false; reason: string };
 
 const RATE_LIMIT_WINDOW_MS = 5_000;
 const RATE_LIMIT_MAX = 20;
+/** Live actions (taps) are batched by clients; allow a brisk but bounded rate. */
+const ACTION_RATE_MAX = 60;
+const MAX_ACTION_BYTES = 1024;
+/** Snapshots caused by live actions go out at most this often… */
+const ACTION_COMMIT_MS = 250;
+/** …and the document they changed is saved at most this often. */
+const ACTION_PERSIST_MS = 2000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const ACTIVITY_LIMIT = 40;
 
@@ -84,6 +101,9 @@ interface QueuedEvent {
   audience: EventAudience;
   payload: unknown;
 }
+
+/** Ledger reversal rows: `<kind>-reversal:<reversed row id>`. */
+const REVERSAL = /^[a-z-]+-reversal:(.+)$/;
 
 const timerKey = (instanceId: string, playerId: string | null, tag: string) => `${instanceId}|${playerId ?? ''}|${tag}`;
 const assignmentKey = (assignmentId: string) => `assignment|${assignmentId}`;
@@ -106,6 +126,9 @@ export class GameRuntime {
   private queue: QueuedEvent[] = [];
   private flushScheduled = false;
   private disposed = false;
+  private actionCommitTimer: unknown = null;
+  private actionPersistTimer: unknown = null;
+  private readonly actionBuckets = new Map<string, number[]>();
 
   constructor(doc: PersistedGame, deps: RuntimeDeps) {
     this.doc = doc;
@@ -114,6 +137,19 @@ export class GameRuntime {
     this.doc.activity ??= [];
     this.doc.attempts ??= [];
     this.doc.assignments ??= [];
+    this.doc.resultsRevealed ??= false;
+    this.doc.standings ??= null;
+    this.doc.standingsFeed ??= [];
+    for (const inst of this.doc.instances) {
+      inst.title ??= '';
+      inst.category ??= '';
+      inst.allowReplay ??= false;
+      // A pinned version that is no longer installed moves up to a compatible minor (same major).
+      if (!deps.registry.get(inst.moduleId, inst.moduleVersion)) {
+        const compatible = deps.registry.compatible(inst.moduleId, inst.moduleVersion);
+        if (compatible) inst.moduleVersion = compatible.manifest.version;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -140,6 +176,9 @@ export class GameRuntime {
       startedAt: null,
       finishedAt: null,
       paused: false,
+      resultsRevealed: false,
+      standings: null,
+      standingsFeed: [],
       seq: 0,
       players: [],
       instances: [],
@@ -154,10 +193,8 @@ export class GameRuntime {
   /** FR-51: bring a persisted game back after a server restart. */
   restoreAfterRestart(): void {
     // In-flight attempts cannot resume faithfully (their timers are gone); players start again.
-    const inFlight = this.doc.attempts.filter((a) => a.status === 'in_progress');
-    for (const a of inFlight) {
-      this.doc.submissions = this.doc.submissions.filter((s) => !(s.challengeInstanceId === a.challengeInstanceId && s.playerId === a.playerId));
-    }
+    const inFlight = new Set(this.doc.attempts.filter((a) => a.status === 'in_progress').map((a) => a.id));
+    this.doc.submissions = this.doc.submissions.filter((s) => !inFlight.has(s.attemptId));
     this.doc.attempts = this.doc.attempts.filter((a) => a.status !== 'in_progress');
     for (const inst of this.doc.instances) inst.timers = inst.timers.filter((t) => t.playerId === null);
     for (const inst of this.doc.instances) {
@@ -218,12 +255,51 @@ export class GameRuntime {
     return this.hostConnections > 0;
   }
 
+  /** The player's most recent attempt at an instance. */
   attemptOf(instanceId: string, playerId: string): PersistedAttempt | undefined {
-    return this.doc.attempts.find((a) => a.challengeInstanceId === instanceId && a.playerId === playerId);
+    return this.doc.attempts.findLast((a) => a.challengeInstanceId === instanceId && a.playerId === playerId);
   }
 
+  attemptsOf(instanceId: string, playerId: string): PersistedAttempt[] {
+    return this.doc.attempts.filter((a) => a.challengeInstanceId === instanceId && a.playerId === playerId);
+  }
+
+  private attemptById(attemptId: string): PersistedAttempt | undefined {
+    return this.doc.attempts.find((a) => a.id === attemptId);
+  }
+
+  /** The live (not superseded) submission of one attempt. */
+  submissionOf(attempt: PersistedAttempt): PersistedSubmission | undefined {
+    return this.doc.submissions.find((s) => s.attemptId === attempt.id && !s.supersededBy);
+  }
+
+  /** The live submission of the player's most recent attempt. */
   latestSubmission(instanceId: string, playerId: string): PersistedSubmission | undefined {
-    return this.doc.submissions.find((s) => s.challengeInstanceId === instanceId && s.playerId === playerId && !s.supersededBy);
+    const attempt = this.attemptOf(instanceId, playerId);
+    return attempt ? this.submissionOf(attempt) : undefined;
+  }
+
+  /** Replays only make sense when each submission is scored on its own. */
+  private replayAllowed(inst: PersistedInstance): boolean {
+    const manifest = this.moduleFor(inst).manifest;
+    return manifest.results === 'immediate' && (inst.allowReplay || manifest.attempts === 'repeat');
+  }
+
+  /** `attempts: 'repeat'` modules: every attempt counts and points add up. */
+  private isRepeat(inst: PersistedInstance): boolean {
+    return this.moduleFor(inst).manifest.attempts === 'repeat';
+  }
+
+  /** The module's own start gate (`canStart`), or null when it has none / is not running yet. */
+  private moduleStartCheck(inst: PersistedInstance, player: PersistedPlayer): StartCheck | null {
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.canStart || inst.moduleState === null) return null;
+    return this.safeView(inst, () => loaded.module.canStart!(inst.moduleState, this.playerRef(player), this.ctxFor(inst)));
+  }
+
+  /** What players see for an instance: the host's title, or the module name. */
+  titleOf(inst: PersistedInstance): string {
+    return inst.title || this.moduleName(inst);
   }
 
   getAssignment(assignmentId: string): PersistedAssignment | undefined {
@@ -277,6 +353,9 @@ export class GameRuntime {
       moduleId: loaded.manifest.id,
       moduleVersion: loaded.manifest.version, // MR-15: pinned
       sortOrder: this.doc.instances.length,
+      title: '',
+      category: '',
+      allowReplay: false,
       configuration: validated.value,
       moduleState: null,
       phase: 'PENDING',
@@ -304,17 +383,63 @@ export class GameRuntime {
     const inst = this.getInstance(instanceId);
     const loaded = this.moduleFor(inst);
     if (configuration !== undefined) {
-      if (inst.moduleState !== null) throw invalidState('Configuration can only be changed before the challenge has been opened; reset it first');
+      // Nobody's answer may be judged against a changed configuration: only while nobody has
+      // played it (never opened, or reset). A closed challenge has to be reset first.
+      const played = this.doc.attempts.some((a) => a.challengeInstanceId === inst.id);
+      const open = inst.phase === 'PENDING' || inst.phase === 'ACTIVE';
+      if (played || !open) throw invalidState('Players have already played this challenge; reset it first to change its configuration');
       const validated = validateConfiguration(loaded.module.configurationSchema, configuration);
       if (!validated.ok) throw validationError(`Invalid configuration: ${validated.errors.join('; ')}`);
       inst.configuration = validated.value;
+      if (inst.moduleState !== null) this.restartModuleState(inst, loaded);
     }
     this.applyOptions(inst, loaded, options);
     this.commit();
     return inst;
   }
 
+  /**
+   * The configuration of an opened (but unplayed) instance changed: the module starts over
+   * from the new configuration. An open instance stays open, without announcing it again.
+   */
+  private restartModuleState(inst: PersistedInstance, loaded: LoadedModule): void {
+    this.cancelInstanceTimers(inst, true);
+    inst.timers = [];
+    inst.evaluation = null;
+    inst.results = null;
+    inst.error = null;
+    inst.moduleState = null;
+    inst.seed = randomSeed();
+    this.rngs.delete(inst.id);
+    // A hidden (re-locked) instance gets fresh state when the host unlocks it again.
+    if (inst.phase !== 'ACTIVE') return;
+    const ok = this.callModule(inst, () => {
+      inst.moduleState = loaded.module.createInstance(inst.configuration, this.ctxFor(inst));
+    });
+    // A module that fails on the new configuration stays hidden (the error shows to the host).
+    this.setPhase(inst, ok ? 'ACTIVE' : 'PENDING');
+  }
+
   private applyOptions(inst: PersistedInstance, loaded: LoadedModule, options: Partial<InstanceOptions>): void {
+    if (options.title !== undefined) {
+      if (typeof options.title !== 'string') throw validationError('Title must be text');
+      const title = options.title.trim().replace(/\s+/g, ' ');
+      if (title.length > 80) throw validationError('Title must be at most 80 characters');
+      inst.title = title;
+    }
+    if (options.category !== undefined) {
+      if (typeof options.category !== 'string') throw validationError('Category must be text');
+      const category = options.category.trim().replace(/\s+/g, ' ');
+      if (category.length > 40) throw validationError('Category must be at most 40 characters');
+      inst.category = category;
+    }
+    if (options.allowReplay !== undefined) {
+      if (typeof options.allowReplay !== 'boolean') throw validationError('allowReplay must be true or false');
+      if (options.allowReplay && loaded.manifest.results !== 'immediate') {
+        throw validationError(`${loaded.manifest.name} scores everyone together when it closes, so it cannot be replayed`);
+      }
+      inst.allowReplay = options.allowReplay;
+    }
     if (options.availability !== undefined) {
       if (!['open', 'host-unlocked', 'assigned'].includes(options.availability)) throw validationError('Invalid availability');
       inst.availability = options.availability;
@@ -334,6 +459,27 @@ export class GameRuntime {
       }
       inst.evaluationMode = options.evaluationMode;
     }
+  }
+
+  /** The game's configuration as a portable setup (media is filled in by the server). */
+  exportSetup(): GameSetup {
+    return {
+      format: SETUP_FORMAT,
+      version: SETUP_VERSION,
+      exportedAt: new Date(this.deps.clock()).toISOString(),
+      game: { name: this.doc.name, settings: structuredClone(this.doc.settings), branding: structuredClone(this.doc.branding) },
+      challenges: this.doc.instances.map((inst) => ({
+        moduleId: inst.moduleId,
+        moduleVersion: inst.moduleVersion,
+        title: inst.title,
+        category: inst.category,
+        configuration: structuredClone(inst.configuration),
+        availability: inst.availability,
+        evaluationMode: inst.evaluationMode,
+        allowReplay: inst.allowReplay,
+      })),
+      media: {},
+    };
   }
 
   removeChallenge(instanceId: string): void {
@@ -410,6 +556,15 @@ export class GameRuntime {
     };
     this.doc.players.push(player);
     this.activity('joined', `${player.displayName} joined`, { playerId: player.id });
+    // Open challenges that care (e.g. making room for a newcomer's blob) hear about it.
+    for (const inst of this.doc.instances) {
+      if (inst.phase !== 'ACTIVE' || inst.moduleState === null) continue;
+      const loaded = this.moduleFor(inst);
+      if (!loaded.module.onPlayerJoin) continue;
+      this.callModule(inst, () => {
+        inst.moduleState = loaded.module.onPlayerJoin!(inst.moduleState, this.playerRef(player), this.ctxFor(inst));
+      });
+    }
     this.queueEvent('PLAYER_JOINED', 'all', { playerId: player.id, displayName: player.displayName });
     this.commit();
     return { player, sessionToken, reclaimed: false };
@@ -469,7 +624,11 @@ export class GameRuntime {
     if (!inst) return { ok: false, reason: 'Challenge not found' };
     const { canStart } = this.eligibility(inst, playerId);
     if (!canStart) return { ok: false, reason: inst.phase === 'ACTIVE' ? 'This challenge is not available to you' : 'This challenge is not open' };
-    if (this.attemptOf(inst.id, playerId)) return { ok: false, reason: 'You have already played this challenge' };
+    const previous = this.attemptOf(inst.id, playerId);
+    if (previous?.status === 'in_progress') return { ok: false, reason: 'You are already playing this challenge' };
+    if (previous && !this.replayAllowed(inst)) return { ok: false, reason: 'You have already played this challenge' };
+    const check = this.moduleStartCheck(inst, player);
+    if (check && !check.ok) return { ok: false, reason: check.reason };
     if (!this.checkRateLimit(playerId)) return { ok: false, reason: 'Slow down a little' };
 
     const attempt: PersistedAttempt = {
@@ -492,13 +651,15 @@ export class GameRuntime {
         return { ok: false, reason: 'The challenge could not start' };
       }
     }
-    this.activity('started', `${player.displayName} started ${loaded.manifest.name}`, { playerId, instanceId: inst.id });
+    const again = previous ? ' again' : '';
+    this.activity('started', `${player.displayName} started ${this.titleOf(inst)}${again}`, { playerId, instanceId: inst.id });
     this.queueEvent('ATTEMPT_STARTED', 'host', { playerId, instanceId: inst.id });
     this.commit();
     return { ok: true };
   }
 
-  submit(playerId: string, instanceId: string, payload: unknown): PlayerResult {
+  /** `final` locks the attempt right after this submission even when the module accepts replacements. */
+  submit(playerId: string, instanceId: string, payload: unknown, final = false): PlayerResult {
     const player = this.getPlayer(playerId);
     if (!player || player.removedAt !== null) return { ok: false, reason: 'You are no longer in this game' };
     if (this.doc.status !== 'IN_PROGRESS') return { ok: false, reason: 'The game is not running' };
@@ -519,7 +680,7 @@ export class GameRuntime {
     if (size > MAX_PAYLOAD_BYTES) return { ok: false, reason: 'Submission too large' };
 
     const loaded = this.moduleFor(inst);
-    const existing = this.latestSubmission(inst.id, playerId);
+    const existing = this.submissionOf(attempt);
     if (existing && loaded.manifest.resubmission !== 'replace') return { ok: false, reason: 'You have already submitted' };
 
     const ref = this.playerRef(player);
@@ -539,6 +700,7 @@ export class GameRuntime {
       id: newId('s'),
       challengeInstanceId: inst.id,
       playerId,
+      attemptId: attempt.id,
       payload: structuredClone(payload),
       submittedAt: this.deps.clock(),
       supersededBy: null,
@@ -551,7 +713,7 @@ export class GameRuntime {
       inst.moduleState = loaded.module.handleInput(inst.moduleState, ref, payload, ctx);
     });
     this.queueEvent('PLAYER_SUBMITTED', 'all', { playerId, displayName: player.displayName, instanceId: inst.id });
-    if (loaded.manifest.resubmission !== 'replace') this.lockAttempt(inst, attempt);
+    if (loaded.manifest.resubmission !== 'replace' || final) this.lockAttempt(inst, attempt);
     this.commit();
     return { ok: true };
   }
@@ -569,8 +731,56 @@ export class GameRuntime {
     return { ok: true };
   }
 
+  /**
+   * Live action (e.g. a batch of taps) for a module's `onAction`: not a submission, so
+   * nothing is stored or evaluated per action. Snapshots are throttled (ACTION_COMMIT_MS).
+   */
+  moduleAction(playerId: string, instanceId: string, payload: unknown): PlayerResult {
+    const player = this.getPlayer(playerId);
+    if (!player || player.removedAt !== null) return { ok: false, reason: 'You are no longer in this game' };
+    if (this.doc.status !== 'IN_PROGRESS') return { ok: false, reason: 'The game is not running' };
+    if (this.doc.paused) return { ok: false, reason: 'The game is paused' };
+    const inst = this.doc.instances.find((i) => i.id === instanceId);
+    if (!inst) return { ok: false, reason: 'Challenge not found' };
+    const loaded = this.moduleFor(inst);
+    if (!loaded.module.onAction || !loaded.module.validateAction) return { ok: false, reason: 'This challenge takes no live actions' };
+    if (inst.phase !== 'ACTIVE') return { ok: false, reason: 'This challenge is not open' };
+    if (this.attemptOf(inst.id, playerId)?.status !== 'in_progress') return { ok: false, reason: 'Start the challenge first' };
+    if (!this.checkActionRate(playerId)) return { ok: false, reason: 'Slow down a little' };
+    let size = 0;
+    try {
+      size = Buffer.byteLength(JSON.stringify(payload) ?? '', 'utf8');
+    } catch {
+      return { ok: false, reason: 'Invalid action' };
+    }
+    if (size > MAX_ACTION_BYTES) return { ok: false, reason: 'Action too large' };
+    const ref = this.playerRef(player);
+    const ctx = this.ctxFor(inst);
+    let verdict: { ok: true } | { ok: false; reason: string } = { ok: true };
+    const ok = this.callModule(inst, () => {
+      verdict = loaded.module.validateAction!(inst.moduleState, ref, payload, ctx);
+      if (verdict.ok) inst.moduleState = loaded.module.onAction!(inst.moduleState, ref, structuredClone(payload), ctx);
+    });
+    if (!ok) {
+      this.commit();
+      return { ok: false, reason: 'The challenge could not process that' };
+    }
+    if (!verdict.ok) return verdict;
+    this.commitSoon();
+    return { ok: true };
+  }
+
+  private checkActionRate(playerId: string): boolean {
+    const now = this.deps.clock();
+    const bucket = (this.actionBuckets.get(playerId) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    const ok = bucket.length < ACTION_RATE_MAX;
+    if (ok) bucket.push(now);
+    this.actionBuckets.set(playerId, bucket);
+    return ok;
+  }
+
   /** Input closes for one player; evaluation starts for immediate-results modules. */
-  private lockAttempt(inst: PersistedInstance, attempt: PersistedAttempt): void {
+  private lockAttempt(inst: PersistedInstance, attempt: PersistedAttempt, closing = false): void {
     if (attempt.status !== 'in_progress') return;
     attempt.status = 'locked';
     attempt.lockedAt = this.deps.clock();
@@ -582,9 +792,13 @@ export class GameRuntime {
         inst.moduleState = loaded.module.onAttemptLocked!(inst.moduleState, this.playerRef(player), this.ctxFor(inst));
       });
     }
-    const submission = this.latestSubmission(inst.id, attempt.playerId);
+    const submission = this.submissionOf(attempt);
+    // An attempt the host's close ended without a submission did not "run out of time".
+    if (player && (submission || !closing)) {
+      const text = submission ? `${player.displayName} finished ${this.titleOf(inst)}` : `${player.displayName} ran out of time on ${this.titleOf(inst)}`;
+      this.activity('submitted', text, { playerId: player.id, instanceId: inst.id });
+    }
     if (submission && loaded.manifest.results === 'immediate') this.beginEvaluation(inst, submission);
-    if (!submission && player) this.activity('submitted', `${player.displayName} ran out of time on ${loaded.manifest.name}`, { playerId: player.id, instanceId: inst.id });
   }
 
   private checkRateLimit(playerId: string): boolean {
@@ -779,7 +993,7 @@ export class GameRuntime {
   }
 
   private toSubmission(inst: PersistedInstance, s: PersistedSubmission): Submission {
-    const attempt = this.attemptOf(inst.id, s.playerId);
+    const attempt = this.attemptById(s.attemptId);
     return {
       id: s.id,
       playerId: s.playerId,
@@ -804,14 +1018,64 @@ export class GameRuntime {
     submission.evaluation = evaluation ?? null;
     submission.scoredAt = this.deps.clock();
     this.writeAwards(inst, scores, `submission:${submission.id}`);
-    const attempt = this.attemptOf(inst.id, submission.playerId);
+    const attempt = this.attemptById(submission.attemptId);
     if (attempt) attempt.status = 'scored';
+    this.settleBestAttempt(inst, submission.playerId);
     const player = this.getPlayer(submission.playerId);
     const own = scores.filter((s) => s.playerId === submission.playerId).reduce((a, s) => a + s.points, 0);
-    if (player) this.activity('scored', `${player.displayName} scored ${fmtPoints(own)} on ${loaded.manifest.name}`, { playerId: player.id, instanceId: inst.id, points: own });
-    this.queueEvent('PLAYER_SCORED', 'all', { playerId: submission.playerId, instanceId: inst.id, points: own });
+    if (player) this.activity('scored', `${player.displayName} scored ${fmtPoints(own)} on ${this.titleOf(inst)}`, { playerId: player.id, instanceId: inst.id, points: own });
+    // Points stay with the host until results are revealed.
+    this.queueEvent('PLAYER_SCORED', this.doc.resultsRevealed ? 'all' : 'host', { playerId: submission.playerId, instanceId: inst.id, points: own });
     this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
     this.maybeFinalizeImmediate(inst);
+  }
+
+  /** Net points the ledger holds for one submission's own awards (after reversals). */
+  private submissionPoints(inst: PersistedInstance, submission: PersistedSubmission): number {
+    const tag = `[submission:${submission.id}]`;
+    const ids = new Set<string>();
+    let total = 0;
+    for (const r of this.doc.ledger) {
+      if (r.challengeInstanceId !== inst.id || r.playerId !== submission.playerId || r.source !== 'module') continue;
+      if (r.reason?.endsWith(tag)) {
+        ids.add(r.id);
+        total += r.points;
+      }
+    }
+    for (const r of this.doc.ledger) {
+      const reversed = r.reason ? REVERSAL.exec(r.reason)?.[1] : undefined;
+      if (reversed && ids.has(reversed)) total += r.points;
+    }
+    return Math.round(total * 100) / 100;
+  }
+
+  /**
+   * Replays: a player's points for an instance equal their best attempt. Every attempt's
+   * own awards stay in the (append-only) ledger; an adjustment row tagged `[best:<player>]`
+   * brings the total back to the best one. Idempotent.
+   */
+  private settleBestAttempt(inst: PersistedInstance, playerId: string): void {
+    if (this.isRepeat(inst) || this.attemptsOf(inst.id, playerId).length < 2) return;
+    const subs = this.doc.submissions.filter((s) => s.challengeInstanceId === inst.id && s.playerId === playerId && !s.supersededBy);
+    const scored = subs.filter((s) => s.scoredAt !== null).map((s) => this.submissionPoints(inst, s));
+    const best = scored.length ? Math.max(...scored) : 0;
+    const bestTag = `[best:${playerId}]`;
+    let current = subs.reduce((a, s) => a + this.submissionPoints(inst, s), 0);
+    for (const r of this.doc.ledger) {
+      if (r.challengeInstanceId === inst.id && r.playerId === playerId && r.source === 'module' && r.reason?.endsWith(bestTag)) current += r.points;
+    }
+    const delta = Math.round((best - current) * 100) / 100;
+    if (delta === 0) return;
+    this.doc.ledger.push({
+      id: newId('a'),
+      gameId: this.doc.id,
+      challengeInstanceId: inst.id,
+      playerId,
+      points: delta,
+      source: 'module',
+      reason: `Only the best attempt counts ${bestTag}`,
+      createdAt: this.deps.clock(),
+    });
   }
 
   private writeAwards(inst: PersistedInstance, scores: ScoreAward[], tag: string): ScoreAward[] {
@@ -887,7 +1151,7 @@ export class GameRuntime {
       .reduce<Map<string, number>>((m, r) => m.set(r.playerId, (m.get(r.playerId) ?? 0) + r.points), new Map());
     inst.results = { scores: [...scores.entries()].map(([playerId, points]) => ({ playerId, points: Math.round(points * 100) / 100 })), statistics };
     this.setPhase(inst, 'RESULTS');
-    this.activity('results', `Results are in for ${loaded.manifest.name}`, { instanceId: inst.id });
+    this.activity('results', `Results are in for ${this.titleOf(inst)}`, { instanceId: inst.id });
     this.queueEvent('RESULTS_AVAILABLE', 'all', { instanceId: inst.id, moduleId: inst.moduleId });
   }
 
@@ -930,9 +1194,31 @@ export class GameRuntime {
     this.finalize(inst);
   }
 
+  /** Evaluations handed to `getStatistics`/`resultsView`: with replays, each player's best attempt only. */
   private evaluationsOf(inst: PersistedInstance): unknown[] {
     if (this.moduleFor(inst).manifest.results === 'onClose') return inst.evaluation === null ? [] : [inst.evaluation];
-    return this.doc.submissions.filter((s) => s.challengeInstanceId === inst.id && !s.supersededBy && s.scoredAt !== null).map((s) => s.evaluation);
+    if (this.isRepeat(inst)) {
+      return this.doc.submissions.filter((s) => s.challengeInstanceId === inst.id && !s.supersededBy && s.scoredAt !== null).map((s) => s.evaluation);
+    }
+    const byPlayer = new Map<string, PersistedSubmission[]>();
+    for (const s of this.doc.submissions) {
+      if (s.challengeInstanceId !== inst.id || s.supersededBy || s.scoredAt === null) continue;
+      byPlayer.set(s.playerId, [...(byPlayer.get(s.playerId) ?? []), s]);
+    }
+    return [...byPlayer.values()].map((subs) => {
+      if (subs.length === 1) return subs[0]!.evaluation;
+      // Highest points wins; the earliest attempt that reached them on a tie.
+      let best = subs[0]!;
+      let bestPoints = this.submissionPoints(inst, best);
+      for (const s of subs.slice(1)) {
+        const p = this.submissionPoints(inst, s);
+        if (p > bestPoints) {
+          best = s;
+          bestPoints = p;
+        }
+      }
+      return best.evaluation;
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -940,8 +1226,18 @@ export class GameRuntime {
   // ---------------------------------------------------------------------------
 
   performHostAction(action: HostAction): HostActionResult {
-    this.assertNotFinished();
+    // Revealing stays possible after the game is closed, so hidden results are never lost,
+    // and a closed game can be continued.
+    if (action.action !== 'reveal-results' && action.action !== 'reopen-game') this.assertNotFinished();
     switch (action.action) {
+      case 'reopen-game':
+        return this.reopenGame();
+      case 'publish-standings':
+        return this.publishStandings();
+      case 'reveal-results':
+        return this.setResultsRevealed(true);
+      case 'hide-results':
+        return this.setResultsRevealed(false);
       case 'open-lobby':
         return this.openLobby();
       case 'start-game':
@@ -985,6 +1281,49 @@ export class GameRuntime {
     }
   }
 
+  /** Points, rankings and results become visible to players and the main display (or hidden again). */
+  /** Copy the live standings to the big screen and record who moved up since the last copy. */
+  private publishStandings(): HostActionResult {
+    const now = this.deps.clock();
+    const entries: PublishedStanding[] = this.liveLeaderboard().map((e) => ({
+      playerId: e.playerId,
+      displayName: e.displayName,
+      rank: e.rank,
+      total: e.total,
+      completed: e.completed,
+      series: e.series,
+    }));
+    const changes = diffStandings(this.doc.standings?.entries ?? null, entries, now);
+    this.doc.standings = { publishedAt: now, entries };
+    this.doc.standingsFeed.push(...changes);
+    if (this.doc.standingsFeed.length > STANDINGS_FEED_LIMIT) this.doc.standingsFeed.splice(0, this.doc.standingsFeed.length - STANDINGS_FEED_LIMIT);
+    this.queueEvent('STANDINGS_PUBLISHED', 'main', { changes: changes.length });
+    this.queueEvent('STANDINGS_PUBLISHED', 'host', { changes: changes.length });
+    this.commit();
+    const n = changes.length;
+    return { ok: true, message: n ? `Big screen updated: ${n} ${n === 1 ? 'change' : 'changes'} in the ranking` : 'Big screen updated: no changes in the ranking' };
+  }
+
+  private liveLeaderboard(): LeaderboardEntry[] {
+    return computeLeaderboard({
+      players: this.doc.players,
+      ledger: this.doc.ledger,
+      instances: this.doc.instances,
+      attempts: this.doc.attempts,
+      submissions: this.doc.submissions,
+      tieBreak: this.doc.settings.tieBreak,
+      connected: (id) => this.isPlayerConnected(id),
+    });
+  }
+
+  private setResultsRevealed(revealed: boolean): HostActionResult {
+    if (this.doc.resultsRevealed === revealed) return { ok: true };
+    this.doc.resultsRevealed = revealed;
+    this.queueEvent(revealed ? 'RESULTS_REVEALED' : 'RESULTS_HIDDEN', 'all', {});
+    this.commit();
+    return { ok: true };
+  }
+
   private openLobby(): HostActionResult {
     if (this.doc.status !== 'DRAFT') throw invalidState('Lobby can only be opened from DRAFT');
     this.doc.status = 'LOBBY';
@@ -1019,7 +1358,7 @@ export class GameRuntime {
     inst.openedAt = this.deps.clock();
     inst.error = null;
     this.setPhase(inst, 'ACTIVE');
-    if (inst.availability !== 'assigned') this.activity('unlocked', `${loaded.manifest.name} is open`, { instanceId: inst.id });
+    if (inst.availability !== 'assigned') this.activity('unlocked', `${this.titleOf(inst)} is open`, { instanceId: inst.id });
     this.queueEvent('CHALLENGE_UNLOCKED', 'all', { instanceId: inst.id, moduleId: inst.moduleId });
   }
 
@@ -1056,10 +1395,10 @@ export class GameRuntime {
     inst.closedAt = this.deps.clock();
     this.cancelInstanceTimers(inst, true);
     for (const attempt of this.doc.attempts) {
-      if (attempt.challengeInstanceId === inst.id && attempt.status === 'in_progress') this.lockAttempt(inst, attempt);
+      if (attempt.challengeInstanceId === inst.id && attempt.status === 'in_progress') this.lockAttempt(inst, attempt, true);
     }
     this.setPhase(inst, 'LOCKED');
-    this.activity('closed', `${loaded.manifest.name} is closed`, { instanceId: inst.id });
+    this.activity('closed', `${this.titleOf(inst)} is closed`, { instanceId: inst.id });
     this.queueEvent('CHALLENGE_LOCKED', 'all', { instanceId: inst.id });
     if (loaded.manifest.results === 'onClose') this.runAggregate(inst);
     else this.maybeFinalizeImmediate(inst);
@@ -1203,9 +1542,34 @@ export class GameRuntime {
     return { ok: true };
   }
 
+  /**
+   * Continue an ended (GAME_RESULTS) or closed (FINISHED) game: back to IN_PROGRESS with
+   * every player, attempt and point kept. Challenges stay as they were; the host reopens
+   * the ones that should be playable again. Results go back to hidden for the new round.
+   */
+  private reopenGame(): HostActionResult {
+    if (this.doc.status !== 'GAME_RESULTS' && this.doc.status !== 'FINISHED') throw invalidState('Only an ended game can be continued');
+    const wasClosed = this.doc.status === 'FINISHED';
+    // A closed game's code may have been handed to another game meanwhile (SR-7).
+    if (wasClosed && this.deps.reclaimCode) this.doc.code = this.deps.reclaimCode(this.doc.code, this.doc.id);
+    this.doc.status = 'IN_PROGRESS';
+    this.doc.finishedAt = null;
+    if (this.doc.resultsRevealed) {
+      this.doc.resultsRevealed = false;
+      this.queueEvent('RESULTS_HIDDEN', 'all', {});
+    }
+    this.queueEvent('GAME_REOPENED', 'all', {});
+    this.commit();
+    return { ok: true, message: wasClosed ? `Game continued — join code ${this.doc.code}. Reopen the challenges players should play.` : 'Game continued. Reopen the challenges players should play.' };
+  }
+
   private closeGame(): HostActionResult {
     if (this.doc.status !== 'GAME_RESULTS') throw invalidState('Only a game showing its results can be closed');
     this.doc.status = 'FINISHED'; // SR-7: the engine stops resolving this code
+    if (!this.doc.resultsRevealed) {
+      this.doc.resultsRevealed = true; // a closed game is read-only: its results are public
+      this.queueEvent('RESULTS_REVEALED', 'all', {});
+    }
     this.commit();
     return { ok: true };
   }
@@ -1312,9 +1676,10 @@ export class GameRuntime {
       this.reverseAwards(inst, `submission:${submission.id}`, 'override-reversal');
       submission.scoredAt = null;
     }
-    const attempt = this.attemptOf(inst.id, submission.playerId);
+    const attempt = this.attemptById(submission.attemptId);
     if (attempt && attempt.status === 'in_progress') this.lockAttempt(inst, attempt);
     else this.scoreSubmission(inst, submission);
+    this.settleBestAttempt(inst, submission.playerId);
     this.commit();
     return { ok: true };
   }
@@ -1350,8 +1715,8 @@ export class GameRuntime {
     } else {
       for (const s of this.doc.submissions) {
         if (s.challengeInstanceId !== inst.id || s.supersededBy || s.scoredAt) continue;
-        const attempt = this.attemptOf(inst.id, s.playerId);
-        const hasPending = this.doc.assignments.some((a) => a.submissionId === s.id && a.status === 'pending');
+        const attempt = this.attemptById(s.attemptId);
+        const hasPending =this.doc.assignments.some((a) => a.submissionId === s.id && a.status === 'pending');
         if (attempt && attempt.status !== 'in_progress' && !hasPending) this.beginEvaluation(inst, s);
       }
       this.maybeFinalizeImmediate(inst);
@@ -1534,42 +1899,40 @@ export class GameRuntime {
     const isHost = audience.role === 'host';
     const player = audience.role === 'player' ? this.getPlayer(audience.playerId) : undefined;
     const activePlayers = this.doc.players.filter((p) => p.removedAt === null);
-    const leaderboard = computeLeaderboard({
-      players: this.doc.players,
-      ledger: this.doc.ledger,
-      instances: this.doc.instances,
-      attempts: this.doc.attempts,
-      submissions: this.doc.submissions,
-      tieBreak: this.doc.settings.tieBreak,
-      connected: (id) => this.isPlayerConnected(id),
-    });
+    const leaderboard = this.liveLeaderboard();
     const visibleInstances = player ? this.doc.instances.filter((i) => this.eligibility(i, player.id).visible) : this.doc.instances;
+    // Until the host reveals results, everyone but the host sees progress only: no points, ranks or results.
+    const reveal = isHost || this.doc.resultsRevealed;
 
     const results: Record<string, ChallengeResults> = {};
-    for (const inst of visibleInstances) {
+    for (const inst of reveal ? visibleInstances : []) {
       if (inst.phase === 'RESULTS') {
         const r = this.buildResults(inst, player ?? null);
         if (r) results[inst.id] = r;
       }
     }
 
+    const activity = audience.role === 'player' ? [] : [...this.doc.activity].reverse();
     return {
       serverTime: this.deps.clock(),
       seq: this.doc.seq,
       game: this.gameSummary(),
       players: activePlayers.map((p) => this.playerPublic(p)),
-      challenges: visibleInstances.map((i) => this.instanceSummary(i, isHost)),
-      leaderboard,
+      challenges: visibleInstances.map((i) => this.instanceSummary(i, isHost, reveal, audience.role === 'main')),
+      leaderboard: reveal ? leaderboard : hideLeaderboardPoints(leaderboard),
       joinUrl: this.deps.joinUrl(this.doc.code),
       me: player ? { playerId: player.id, displayName: player.displayName } : null,
-      board: player ? visibleInstances.map((i) => this.boardEntry(i, player)) : [],
+      board: player ? visibleInstances.map((i) => this.boardEntry(i, player, reveal)) : [],
       judging: player ? this.judgeTasks(player) : [],
-      activity: audience.role === 'player' ? [] : [...this.doc.activity].reverse(),
+      activity: reveal ? activity : activity.filter((a) => a.kind !== 'scored' && a.kind !== 'results').map(({ points: _p, ...a }) => a),
       results,
       hostQueue: isHost ? this.hostQueue() : [],
       resolutions: isHost ? this.resolutions() : [],
       evaluations: isHost ? this.evaluationRecords() : [],
       scored: isHost ? this.scoredSummaries() : [],
+      // The big screen shows what the host last published, whatever is revealed on phones.
+      standings: player ? null : this.doc.standings,
+      standingsFeed: player ? [] : [...this.doc.standingsFeed].reverse(),
     };
   }
 
@@ -1585,6 +1948,7 @@ export class GameRuntime {
       startedAt: this.doc.startedAt,
       finishedAt: this.doc.finishedAt,
       paused: this.doc.paused,
+      resultsRevealed: this.doc.resultsRevealed,
     };
   }
 
@@ -1596,31 +1960,36 @@ export class GameRuntime {
     return this.deps.registry.get(inst.moduleId, inst.moduleVersion)?.manifest.name ?? inst.moduleId;
   }
 
-  private stats(inst: PersistedInstance): ChallengeStats {
+  private stats(inst: PersistedInstance, showPoints: boolean): ChallengeStats {
     const attempts = this.doc.attempts.filter((a) => a.challengeInstanceId === inst.id);
     const subs = this.doc.submissions.filter((s) => s.challengeInstanceId === inst.id && !s.supersededBy);
     const totals = new Map<string, number>();
     for (const r of this.doc.ledger) {
       if (r.challengeInstanceId === inst.id && r.source === 'module') totals.set(r.playerId, (totals.get(r.playerId) ?? 0) + r.points);
     }
-    const scoredPoints = attempts.filter((a) => a.status === 'scored').map((a) => totals.get(a.playerId) ?? 0);
+    const scoredPlayers = new Set(attempts.filter((a) => a.status === 'scored').map((a) => a.playerId));
+    const scoredPoints = [...scoredPlayers].map((id) => totals.get(id) ?? 0);
     return {
-      started: attempts.length,
-      submitted: subs.length,
-      scored: scoredPoints.length,
+      started: new Set(attempts.map((a) => a.playerId)).size,
+      attempts: attempts.length,
+      submitted: new Set(subs.map((s) => s.playerId)).size,
+      scored: scoredPlayers.size,
       // Every locked-but-unscored submission is waiting for evaluation (automatic pending, peer or host).
-      pendingEvaluations: subs.filter((s) => !s.scoredAt && this.attemptOf(inst.id, s.playerId)?.status === 'locked').length,
-      averagePoints: scoredPoints.length ? Math.round((scoredPoints.reduce((a, b) => a + b, 0) / scoredPoints.length) * 10) / 10 : null,
-      bestPoints: scoredPoints.length ? Math.max(...scoredPoints) : null,
+      pendingEvaluations: subs.filter((s) => !s.scoredAt && this.attemptById(s.attemptId)?.status === 'locked').length,
+      averagePoints: showPoints && scoredPoints.length ? Math.round((scoredPoints.reduce((a, b) => a + b, 0) / scoredPoints.length) * 10) / 10 : null,
+      bestPoints: showPoints && scoredPoints.length ? Math.max(...scoredPoints) : null,
     };
   }
 
-  instanceSummary(inst: PersistedInstance, includeConfig: boolean): ChallengeInstanceSummary {
+  instanceSummary(inst: PersistedInstance, includeConfig: boolean, showPoints = true, withPanel = false): ChallengeInstanceSummary {
     const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
     const manifest = loaded?.manifest;
     const firstString = Object.values(inst.configuration).find((v) => typeof v === 'string' && !v.startsWith('media://')) as string | undefined;
     return {
       id: inst.id,
+      title: this.titleOf(inst),
+      customTitle: includeConfig ? inst.title : undefined,
+      category: inst.category,
       moduleId: inst.moduleId,
       moduleVersion: inst.moduleVersion,
       moduleName: manifest?.name ?? inst.moduleId,
@@ -1633,35 +2002,58 @@ export class GameRuntime {
       sortOrder: inst.sortOrder,
       phase: inst.phase,
       availability: inst.availability,
+      allowReplay: inst.allowReplay,
       assignedPlayerIds: includeConfig || inst.availability === 'assigned' ? inst.assignedPlayerIds : undefined,
-      stats: this.stats(inst),
+      stats: this.stats(inst, showPoints),
       configuration: includeConfig ? inst.configuration : undefined,
       error: includeConfig ? inst.error : undefined,
-      title: includeConfig ? firstString : undefined,
+      summary: includeConfig ? firstString : undefined,
+      displayPanel: withPanel ? this.displayPanelOf(inst) : undefined,
     };
   }
 
-  private boardEntry(inst: PersistedInstance, player: PersistedPlayer): BoardEntry {
+  /** The module's live big-screen panel (null when it has none or has not started). */
+  private displayPanelOf(inst: PersistedInstance): UINode | null {
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.displayPanel || inst.moduleState === null || inst.phase === 'PENDING') return null;
+    return this.safeView(inst, () => loaded.module.displayPanel!(inst.moduleState, this.ctxFor(inst))) ?? null;
+  }
+
+  private boardEntry(inst: PersistedInstance, player: PersistedPlayer, reveal: boolean): BoardEntry {
     const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
     const manifest = loaded?.manifest;
-    const attempt = this.attemptOf(inst.id, player.id);
-    const submission = this.latestSubmission(inst.id, player.id);
+    const attempts = this.attemptsOf(inst.id, player.id);
+    const attempt = attempts.at(-1);
+    const submission = attempt ? this.submissionOf(attempt) : undefined;
     const { canStart } = this.eligibility(inst, player.id);
     const ctx = loaded ? this.ctxFor(inst) : null;
     const ref = this.playerRef(player);
 
+    const live = attempt?.status === 'in_progress';
+    // The module's own gate (e.g. turn-taking) applies only where the engine would allow a start.
+    const check = canStart && !live && loaded ? this.moduleStartCheck(inst, player) : null;
+    const blocked = check !== null && !check.ok;
+    const repeat = manifest?.attempts === 'repeat';
+
+    // With replays the tile reflects the best outcome so far, not just the latest attempt.
+    // Repeat modules are about the next contribution: playable or waiting while they are open.
     let status: AttemptStatus;
-    if (attempt?.status === 'in_progress') status = 'in_progress';
-    else if (attempt?.status === 'scored') status = 'scored';
-    else if (attempt?.status === 'locked') status = submission ? 'submitted' : 'missed';
-    else if (canStart) status = 'available';
+    if (live) status = 'in_progress';
+    else if (repeat && canStart) status = blocked ? 'waiting' : 'available';
+    else if (attempts.some((a) => a.status === 'scored')) status = 'scored';
+    else if (attempts.some((a) => a.status === 'locked' && this.submissionOf(a))) status = 'submitted';
+    else if (attempt) status = 'missed';
+    else if (canStart) status = blocked ? 'waiting' : 'available';
     else if (inst.phase === 'PENDING') status = 'locked';
     else status = 'closed';
+    // Until results are revealed a finished attempt looks the same whether or not it has been scored.
+    if (!reveal && status === 'scored') status = 'submitted';
+    const canReplay = attempt !== undefined && !live && canStart && !blocked && this.replayAllowed(inst);
 
     let intro: UINode | null = null;
     let view: UINode | null = null;
     let canSubmit = false;
-    let statusText: string | null = null;
+    let statusText: string | null = check ? (check.ok ? (check.hint ?? null) : check.reason) : null;
     let result: UINode | null = null;
 
     if (loaded && ctx && inst.moduleState !== null) {
@@ -1674,9 +2066,11 @@ export class GameRuntime {
           canSubmit = Boolean(vm.canSubmit) && !this.doc.paused;
           statusText = vm.status ?? null;
         }
+      } else if (!reveal || status === 'waiting') {
+        // Nothing about the outcome until the host reveals results.
       } else if (status === 'scored' || inst.phase === 'RESULTS') {
         result = this.personalResult(inst, player);
-      } else if (status === 'submitted') {
+      } else if (status === 'submitted' && statusText === null) {
         statusText = this.effectiveMode(inst) === 'automatic' ? 'Waiting for results' : 'Waiting for a judge';
       }
     }
@@ -1687,6 +2081,8 @@ export class GameRuntime {
 
     return {
       instanceId: inst.id,
+      title: this.titleOf(inst),
+      category: inst.category,
       moduleName: manifest?.name ?? inst.moduleId,
       moduleCategory: manifest?.category ?? 'other',
       description: manifest?.description ?? '',
@@ -1695,8 +2091,15 @@ export class GameRuntime {
       typicalSeconds: manifest?.duration.typicalSeconds ?? 60,
       phase: inst.phase,
       status,
-      points: status === 'scored' ? Math.round(points * 100) / 100 : null,
+      points: status === 'scored' || (repeat && reveal && attempts.some((a) => a.status === 'scored')) ? Math.round(points * 100) / 100 : null,
       startedAt: attempt?.startedAt ?? null,
+      attempts: attempts.length,
+      canReplay,
+      repeat,
+      note:
+        loaded?.module.playerNote && ctx && inst.moduleState !== null
+          ? (this.safeView(inst, () => loaded.module.playerNote!(inst.moduleState, ref, ctx)) ?? null)
+          : null,
       intro,
       view,
       canSubmit,
@@ -1798,6 +2201,7 @@ export class GameRuntime {
       tasks.push({
         assignmentId: a.id,
         instanceId: inst.id,
+        title: this.titleOf(inst),
         moduleName: manifest?.name ?? inst.moduleId,
         criteria: manifest?.evaluation.criteria ?? 'Does this submission meet the challenge?',
         deadlineAt: a.deadlineAt ?? 0,
@@ -1818,6 +2222,7 @@ export class GameRuntime {
       items.push({
         assignmentId: a.id,
         instanceId: inst.id,
+        title: this.titleOf(inst),
         moduleName: manifest?.name ?? inst.moduleId,
         submissionId: submission.id,
         playerId: submission.playerId,
@@ -1843,7 +2248,7 @@ export class GameRuntime {
           loaded?.module.hostResolutionView && inst.moduleState !== null
             ? this.safeView(inst, () => loaded.module.hostResolutionView!(inst.moduleState, inst.evaluation, this.ctxFor(inst)))
             : null;
-        return { instanceId: inst.id, moduleName: this.moduleName(inst), form: form ?? null };
+        return { instanceId: inst.id, title: this.titleOf(inst), moduleName: this.moduleName(inst), form: form ?? null };
       });
   }
 
@@ -1856,6 +2261,7 @@ export class GameRuntime {
         return {
           assignmentId: a.id,
           instanceId: a.challengeInstanceId,
+          title: inst ? this.titleOf(inst) : '',
           moduleName: inst ? this.moduleName(inst) : '',
           submissionId: a.submissionId,
           playerId: submission?.playerId ?? '',
@@ -1881,12 +2287,17 @@ export class GameRuntime {
       const inst = this.doc.instances.find((i) => i.id === s.challengeInstanceId);
       if (!inst) continue;
       const manifest = this.deps.registry.get(inst.moduleId, inst.moduleVersion)?.manifest;
-      const points = this.doc.ledger
-        .filter((r) => r.challengeInstanceId === inst.id && r.playerId === s.playerId && r.source === 'module')
-        .reduce((a, r) => a + r.points, 0);
+      // Immediate results: this submission's own points (a replayed attempt may not be the one that counts).
+      const points =
+        manifest?.results === 'immediate'
+          ? this.submissionPoints(inst, s)
+          : this.doc.ledger
+              .filter((r) => r.challengeInstanceId === inst.id && r.playerId === s.playerId && r.source === 'module')
+              .reduce((a, r) => a + r.points, 0);
       out.push({
         submissionId: s.id,
         instanceId: inst.id,
+        title: this.titleOf(inst),
         moduleName: manifest?.name ?? inst.moduleId,
         playerId: s.playerId,
         displayName: this.getPlayer(s.playerId)?.displayName ?? 'Unknown',
@@ -1915,7 +2326,16 @@ export class GameRuntime {
    * Flush queued events (each with a fresh sequence number, FR-37), then push a fresh
    * audience-scoped snapshot to every connected client (FR-36/FR-38), then persist.
    */
-  private commit(): void {
+  /** Coalesce the commits caused by live actions (see ACTION_COMMIT_MS). */
+  private commitSoon(): void {
+    if (this.actionCommitTimer !== null || this.disposed) return;
+    this.actionCommitTimer = this.deps.setTimer(() => {
+      this.actionCommitTimer = null;
+      this.commit(true);
+    }, ACTION_COMMIT_MS);
+  }
+
+  private commit(fromActions = false): void {
     if (this.disposed) return;
     const at = new Date(this.deps.clock()).toISOString();
     const events = this.queue;
@@ -1934,7 +2354,17 @@ export class GameRuntime {
     for (const [playerId, n] of this.playerConnections) {
       if (n > 0) emitSnapshot({ role: 'player', playerId }, `player:${playerId}`);
     }
-    this.persist();
+    if (fromActions) this.persistSoon();
+    else this.persist();
+  }
+
+  /** Saving the whole document on every batch of taps is wasteful: save live-action changes every few seconds. */
+  private persistSoon(): void {
+    if (this.actionPersistTimer !== null) return;
+    this.actionPersistTimer = this.deps.setTimer(() => {
+      this.actionPersistTimer = null;
+      this.persist();
+    }, ACTION_PERSIST_MS);
   }
 
   private persist(): void {
@@ -1958,6 +2388,8 @@ export class GameRuntime {
     this.disposed = true;
     for (const h of this.timerHandles.values()) this.deps.clearTimer(h);
     this.timerHandles.clear();
+    if (this.actionCommitTimer !== null) this.deps.clearTimer(this.actionCommitTimer);
+    if (this.actionPersistTimer !== null) this.deps.clearTimer(this.actionPersistTimer);
   }
 
   // ---------------------------------------------------------------------------
@@ -1971,6 +2403,13 @@ export class GameRuntime {
   private assertInProgress(): void {
     if (this.doc.status !== 'IN_PROGRESS') throw invalidState('The game is not in progress');
   }
+}
+
+/** Players and the main display before results are revealed: who completed how much, no points or ranks. */
+function hideLeaderboardPoints(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  return entries
+    .map((e) => ({ ...e, rank: 0, total: 0, lastDelta: 0, wins: 0, series: [] }))
+    .sort((a, b) => b.completed - a.completed || a.displayName.localeCompare(b.displayName));
 }
 
 function fmtPoints(n: number): string {

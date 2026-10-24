@@ -91,18 +91,35 @@ async function main(): Promise<void> {
   form.append('file', new Blob([demoPng()], { type: 'image/png' }), 'shapes.png');
   const media = await call<{ ref: string }>(`/api/games/${game.id}/media`, { method: 'POST', token, body: form });
 
-  // Open to everyone from the start.
-  await add('multiple-choice', { question: 'Which planet has the most moons?', options: ['Jupiter', 'Saturn', 'Uranus', 'Neptune'], correctIndex: 1, timeLimit: 20, points: 10 });
-  await add('numeric-answer', { question: 'How many keys does a standard piano have?', correctAnswer: 88, timeLimit: 20 });
-  await add('closest-number', { question: 'How many golf balls fit in the jar?', correctAnswer: 137, timeLimit: 30, scoring: 'ranked' });
-  await add('timed-reaction', { minDelaySeconds: 2, maxDelaySeconds: 6, windowSeconds: 4, maxPoints: 10 });
-  await add('image-memory', { image: media.ref, viewSeconds: 8, question: 'How many red squares were there?', options: ['3', '4', '5', '6'], correctIndex: 1, answerSeconds: 15 });
-  await add('caption-this', { image: media.ref, prompt: 'Caption this masterpiece', timeLimit: 90, points: 10 });
-  await add('photo-hunt', { task: 'Take a photo of something red in the room', timeLimit: 180, points: 10 });
-  await add('majority-vote', { question: 'Pineapple on pizza?', options: ['Obviously yes', 'Absolutely not', 'Only when nobody is watching'], timeLimit: 20 });
-  // Host decides when these open.
-  await add('prediction', { question: 'Who will give the best sales pitch?', optionsSource: 'players', timeLimit: 30, points: 10 }, { availability: 'host-unlocked' });
-  await add('open-performance', { prompt: 'Give your best 30-second sales pitch for a paperclip', instructions: 'Type a catchy title, then perform it live for the host.', timeLimit: 120, points: 10 }, { availability: 'host-unlocked', evaluationMode: 'host' });
+  // Every challenge opens when the game starts.
+  await add('multiple-choice', { question: 'Which planet has the most moons?', options: ['Jupiter', 'Saturn', 'Uranus', 'Neptune'], correctIndex: 1, timeLimit: 20, points: 10 }, { title: 'Space trivia' });
+  await add('numeric-answer', { question: 'How many keys does a standard piano have?', correctAnswer: 88, timeLimit: 20 }, { title: 'Piano keys' });
+  await add(
+    'multi-answer',
+    {
+      question: 'Name the Benelux capitals',
+      answers: [
+        { label: 'Belgium', answer: 'Brussels', alternatives: 'Brussel, Bruxelles' },
+        { label: 'Netherlands', answer: 'Amsterdam' },
+        { label: 'Luxembourg', answer: 'Luxembourg', alternatives: 'Luxemburg' },
+      ],
+      timeLimit: 45,
+      points: 10,
+    },
+    { title: 'Benelux capitals' },
+  );
+  await add('closest-number', { question: 'How many golf balls fit in the jar?', correctAnswer: 137, timeLimit: 30, scoring: 'ranked' }, { title: 'The golf ball jar' });
+  await add('timed-reaction', { minDelaySeconds: 2, maxDelaySeconds: 6, windowSeconds: 4, maxPoints: 10 }, { title: 'Fastest finger', allowReplay: true });
+  await add('stop-the-clock', { targetSeconds: 35, hideAfterSeconds: 5, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 }, { title: 'Stop at 35 seconds', allowReplay: true });
+  await add('image-memory', { image: media.ref, viewSeconds: 8, question: 'How many red squares were there?', options: ['3', '4', '5', '6'], correctIndex: 1, answerSeconds: 15 }, { title: 'Look closely' });
+  await add('caption-this', { image: media.ref, prompt: 'Caption this masterpiece', timeLimit: 90, points: 10 }, { title: 'Caption the art' });
+  await add('photo-hunt', { task: 'Take a photo of something red in the room', timeLimit: 180, points: 10 }, { title: 'Red alert' });
+  await add('majority-vote', { question: 'Pineapple on pizza?', options: ['Obviously yes', 'Absolutely not', 'Only when nobody is watching'], timeLimit: 20 }, { title: 'Pizza debate' });
+  await add('blob-war', { points: 10, tapsToMax: 150, maxShare: 0.2 }, { title: 'Blob war' });
+  await add('group-message', { prompt: 'Write a birthday message for Dabian', wordsPerTurn: 3, visibleWords: 35, turnSeconds: 300, maxTurnsPerPlayer: 10, pointsPerTurn: 1 }, { title: 'Birthday message' });
+  await add('secret-word', { maxPoints: 10, pointsPerWord: 2 }, { title: 'Secret words' });
+  await add('prediction', { question: 'Who will give the best sales pitch?', optionsSource: 'players', timeLimit: 30, points: 10 }, { title: 'Pitch predictions' });
+  await add('open-performance', { prompt: 'Give your best 30-second sales pitch for a paperclip', instructions: 'Type a catchy title, then perform it live for the host.', timeLimit: 120, points: 10 }, { title: 'Paperclip pitch', evaluationMode: 'host' });
 
   await call(`/api/games/${game.id}/actions`, { method: 'POST', token, body: JSON.stringify({ action: 'open-lobby' }) });
 
@@ -112,7 +129,7 @@ async function main(): Promise<void> {
   console.log(`Display:    ${webBase}/display/${game.code}`);
   console.log(`Join:       ${webBase}/join/${game.code}`);
   console.log('');
-  console.log('Two challenges are host-unlocked: open them from the Run tab when the moment is right.');
+  console.log('Results stay hidden from players until you press "Reveal results" in the Run tab.');
   console.log('Keep the host token safe; it is the only credential for this game.');
 }
 

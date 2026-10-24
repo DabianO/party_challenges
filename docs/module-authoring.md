@@ -20,17 +20,23 @@ the platform comes through the `InstanceContext` argument.
 ## 0. The game model
 
 A game is a **board** of challenge instances. There is no host stepping everyone through
-questions: each player opens a challenge from their board whenever they like, presses
-**Start**, plays it at their own pace (with their own timers) and submits. This is an
-**attempt**; one attempt per player per instance. The engine evaluates submissions
-(§14) and writes scores to the ledger. The main display shows the leaderboard, activity
-and statistics, not a shared question.
+questions: each player taps a challenge on their board whenever they like (that starts
+it), plays it at their own pace (with their own timers) and submits. This is an
+**attempt**; one per player per instance, unless the host allows **replays** on an
+`immediate` instance, in which case a player may start new attempts and only their best
+one counts. The engine evaluates submissions (§14) and writes scores to the ledger.
+Results stay hidden from players and the main display until the host reveals them; the
+engine handles that, modules render results as usual. The main display shows progress or
+the leaderboard, activity and statistics, not a shared question.
 
 Consequences for module code:
 
 - Instance state is **shared** by all players. Keep per-player data keyed by
   `player.id` (e.g. `guesses[player.id]`).
 - Timers are **per player** when passed a `playerId`: `ctx.schedule('lock', 30, player.id)`.
+- With replays, `onAttemptStart` runs again for the same player: **clear that player's
+  per-attempt data there** (e.g. `const { [player.id]: _, ...answers } = state.answers`),
+  or `validateInput` will still see the previous attempt's answer.
 - `guestView(state, player, ctx)` renders **that player's** attempt and must not leak
   other players' data (MR-10). The main display never shows answers (MR-9).
 
@@ -61,7 +67,7 @@ Consequences for module code:
 
 | Field | Notes |
 |---|---|
-| `id`, `version` | kebab-case id; `id@version` identifies a build; games pin the exact version. |
+| `id`, `version` | kebab-case id; `id@version` identifies a build; games pin the exact version. A game whose pinned version is no longer installed moves up to the newest installed version **with the same major**, so minor/patch releases must keep `State` and `Config` compatible; bump the major for anything else. |
 | `apiVersion` | Must be `"2"`. The loader refuses anything else. |
 | `category` | `knowledge`, `skill`, `social`, `memory`, `chaos`, `other`. |
 | `evaluation.mode` | `automatic` (your `evaluate()` decides), `peer` (another player approves/rejects), `host` (host queue), `hybrid` (peers first, rejections go to the host). |
@@ -71,7 +77,8 @@ Consequences for module code:
 | `evaluation.hostScoring` | Optional `{min,max,step}`; when set the host may enter points instead of approve/reject. The value arrives in `judgement.points`. |
 | `evaluation.deadlineSeconds` | Optional per-module override of the judge deadline. |
 | `results` | `immediate` — each submission is evaluated on its own as soon as the attempt locks (after judging). `onClose` — evaluation runs once over all submissions when the host closes the challenge (ranking, votes, predictions). `onClose` modules must be `automatic`. |
-| `resubmission` | `none` (default: submitting locks the attempt) or `replace` (players can change their answer until their timer fires or they press Finish). |
+| `resubmission` | `none` (default: submitting locks the attempt) or `replace` (a client may replace the answer until the timer fires or it sends FINISH). The web client always locks on the first submit (`final: true`), so design `guestView` around a single submit. |
+| `attempts` | `once` (default; the host may still enable best-of replays) or `repeat`: taking part repeatedly *is* the challenge. Players may always start a new attempt, every attempt is scored and the points add up; gate who may start with `canStart`. `immediate` results only. Examples: `group-message`, `secret-word`. After a repeat attempt locks, a player who may start again straight away is offered to continue on the same screen. |
 | `capabilities` | Declare everything you use (`timer`, `image`, `text-input`, `numeric-input`, `multiple-choice`, `evidence-upload`, `statistics`, …). |
 
 ## 2. config.schema.json
@@ -119,10 +126,40 @@ none`, timer `lock` fired, player pressed Finish, or the host closed the instanc
 evaluated → scored.
 
 1. **`createInstance(config, ctx)`** runs when the instance becomes available (once).
-2. **`onAttemptStart(state, player, ctx)`** runs when a player presses Start. Schedule
-   their time limit: `ctx.schedule('lock', state.config.timeLimit, player.id)`. You can
-   schedule other per-player timers (`'go'`, `'hide'`, …) and react in
-   `onTimer(state, tag, ctx, playerId)`.
+1b. **`canStart(state, player, ctx)`** (optional) adds a gate on top of the engine's
+   availability, e.g. turn-taking. Return `{ ok: true, hint? }` (the hint shows on the
+   player's tile, e.g. "Your turn!") or `{ ok: false, reason }` (the tile shows a waiting
+   state with the reason; starting is refused). It is called for every player on every
+   snapshot, so keep it pure and cheap.
+1c. **`playerNote(state, player, ctx)`** (optional) returns a short personal line for the
+   player's tile and lock-in message, e.g. `"312 ms · best 287 ms"`. It is shown even while
+   the host keeps results hidden, so use it for practice feedback, not to give away answers.
+1d. **Live actions** (optional, implement both): `validateAction` / `onAction(state, player,
+   payload, ctx)` take rapid input that is *not* a submission, e.g. taps from a
+   `ui.tapPad('pump')` (payload `{ pump: tapsSinceLastBatch }`, sent every ~300 ms). Only
+   accepted while the player's attempt is in progress and the instance is ACTIVE; nothing is
+   stored or evaluated per action, and the engine throttles the snapshots they cause. Pair
+   with `results: "onClose"` and score from state. Example: `blob-war`.
+   `ui.stopwatch('clock', { hideAfterSeconds })` is timed on the phone itself: Start sends
+   the live action `{ clock: 'start' }`, Stop submits `{ clock: elapsedMs }` measured between
+   the two touches, so Wi-Fi delay does not count. Note the server time in `onAction` and
+   compare it with the submission to catch implausible times. Example: `stop-the-clock`.
+1e. **`displayPanel(state, ctx)`** (optional) is a live panel for the big screen, shown next
+   to the race graph while the instance is open and as the closing picture after it closes
+   or the game ends. Everyone sees it, so never leak answers. `ui.blobField(fieldId, 'live' |
+   'final', { cols, rows, cells }, blobs)` renders a territory map: `cells` is one character
+   per grid cell (row by row, `blobCells.encode(slot)` or `blobCells.EMPTY`), and each blob
+   names its `slot`, `color` (#rrggbb), `label`, `share` and an optional `pulse` counter
+   (a glow when it rises). Live it is drawn as embossed liquid that flows between snapshots;
+   final as a gapless picture with every share (empty cells join the nearest territory).
+1f. **`onPlayerJoin(state, player, ctx)`** (optional) runs for every ACTIVE instance when a
+   new player joins the game, before they start anything, e.g. to give them a place on a
+   shared field right away.
+2. **`onAttemptStart(state, player, ctx)`** runs when a player starts the challenge (and
+   again on every replay). Schedule their time limit:
+   `ctx.schedule('lock', state.config.timeLimit, player.id)`, and reset the player's
+   per-attempt data. You can schedule other per-player timers (`'go'`, `'hide'`, …) and
+   react in `onTimer(state, tag, ctx, playerId)`.
 3. **Timers**: reserved tag `lock` with a `playerId` locks that player's attempt; without a
    playerId it closes the whole instance. Clients render `ui.timer(tag)` as a countdown;
    attempt-scoped timers are only visible to their player.
@@ -141,9 +178,10 @@ evaluated → scored.
      `hostResolutionView`/`applyHostResolution`, the instance waits in `EVALUATING`
      until the host submits your form (e.g. "who actually won?"), then scores.
 6. **Results**: `resultsView(state, evaluations, ctx)` receives all evaluations so far
-   (`onClose`: one). Return `{ ui, guestUi?(player) }`; `guestUi` is the personal result
-   a player sees right after scoring, `ui` is shown on the display when the instance
-   reaches `RESULTS`. `getStatistics(state, evaluations)` gets the same array.
+   (`onClose`: one; with replays, only each player's best attempt). Return
+   `{ ui, guestUi?(player) }`; `guestUi` is the personal result a player sees once the
+   host reveals results, `ui` is shown on the display when the instance reaches
+   `RESULTS` (also after the reveal). `getStatistics(state, evaluations)` gets the same array.
 
 ### Rules
 
@@ -153,7 +191,10 @@ evaluated → scored.
 - **Never implement judging yourself** (MR-18): no queues, deadlines, or judge picking.
   Declare `criteria`/`evidence` and map judgements to points.
 - `submission.startedAt` (attempt start) and `submission.submittedAt` are server times:
-  use them for speed bonuses and reaction timing (SR-5). Client-reported times are advisory.
+  use them for speed bonuses and reaction timing (SR-5). Client-reported times are advisory,
+  with one bounded exception: a `ui.stopwatch` time is more precise than any server
+  measurement over Wi-Fi, so `stop-the-clock` accepts it only when it lies within 750 ms of
+  the server's own measurement (start action → submission) and uses the server's time otherwise.
 - Player names come from `ctx.players()`; store `displayName` in evaluation rows so
   `resultsView` can render without a roster lookup.
 - Use `ctx.mediaUrl(ref)` to turn a `media://…` config value into a URL for `ui.image`.
@@ -189,7 +230,7 @@ the engine like `packages/engine/test/lifecycle.test.ts`. Run `npm test`.
 
 - [ ] `manifest.json` and `server/index.ts` agree on `id` and `version`; `apiVersion` is `"2"`
 - [ ] every capability used is declared; `evaluation.criteria` set for non-automatic modes
-- [ ] time limit scheduled in `onAttemptStart` with `player.id`
+- [ ] time limit scheduled in `onAttemptStart` with `player.id`, and the player's previous attempt data cleared there (replays)
 - [ ] `guestView` shows only the current player's data; `mainView` leaks nothing
 - [ ] `evaluate` handles one submission (`immediate`) or all (`onClose`) — check `submissions.length`
 - [ ] `calculateScores` only returns players from `ctx.players()`

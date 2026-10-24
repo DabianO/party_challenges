@@ -90,8 +90,8 @@ export function ResultsTab({ ctx }: { ctx: HostCtx }) {
                 <div className="row gap-sm align-center wrap">
                   <span className="mono muted">{i + 1}</span>
                   <span className="grow stack gap-xs">
-                    <strong>{c.moduleName}</strong>
-                    {c.title && <span className="muted small clamp">{c.title}</span>}
+                    <strong>{c.title}</strong>
+                    {c.summary && <span className="muted small clamp">{c.summary}</span>}
                     <span className="row gap-xs wrap">
                       <EvaluationBadge mode={c.evaluationMode} short />
                       <span className="muted small mono">{statsLine(c)}</span>
@@ -154,7 +154,7 @@ export function ResultsTab({ ctx }: { ctx: HostCtx }) {
                     <td>
                       <span className={`badge ${row.source === 'manual' ? 'tone-warning' : 'tone-muted'}`}>{row.source}</span>
                     </td>
-                    <td className="muted small">{row.challengeInstanceId ? challenges.find((c) => c.id === row.challengeInstanceId)?.moduleName ?? '—' : '—'}</td>
+                    <td className="muted small">{row.challengeInstanceId ? challenges.find((c) => c.id === row.challengeInstanceId)?.title ?? '—' : '—'}</td>
                     <td className="muted small">{row.reason ?? ''}</td>
                   </tr>
                 ))}

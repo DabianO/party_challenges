@@ -30,6 +30,9 @@ beforeAll(async () => {
     mediaMaxBytes: 1024 * 1024,
     hostCreatePassword: null,
     webDistDir: null,
+    webDevPort: 5999,
+    hostKey: 'test-host-key-0123456789abcdefghijklmnop',
+    localHostAccess: true,
   });
   await engine.init();
   await app.listen({ port: 0, host: '127.0.0.1' });
@@ -189,7 +192,8 @@ describe('REST + WebSocket API', () => {
     expect(await ada.socket.next(ackOf('c1'))).toMatchObject({ ok: true });
     const inProgress = snapshotOf(await ada.socket.next((m) => snapshotOf(m)?.board[0]?.status === 'in_progress'))!;
     expect(inProgress.board[0]!.timers[0]).toMatchObject({ tag: 'lock', playerId: ada.playerId });
-    expect(JSON.stringify(snapshotOf(await display.next((m) => snapshotOf(m) !== null))!)).not.toContain('500');
+    // The answer (500) must not reach the big screen; ids and timestamps may contain those digits.
+    expect(JSON.stringify(snapshotOf(await display.next((m) => snapshotOf(m) !== null))!)).not.toMatch(/(?<![\w.])500(?![\w.])/);
     ada.socket.send({ type: 'SUBMIT', instanceId: closest.body.challenge.id, payload: { answer: 480 }, clientId: 'c2' });
     expect(await ada.socket.next(ackOf('c2'))).toMatchObject({ ok: true });
     ada.socket.send({ type: 'FINISH', instanceId: closest.body.challenge.id, clientId: 'c3' });
@@ -201,10 +205,10 @@ describe('REST + WebSocket API', () => {
     await bea.socket.next((m) => snapshotOf(m)?.board[1]?.status === 'available');
     bea.socket.send({ type: 'START', instanceId: gated.body.challenge.id, clientId: 'b1' });
     await bea.socket.next(ackOf('b1'));
-    bea.socket.send({ type: 'SUBMIT', instanceId: gated.body.challenge.id, payload: { caption: 'Cheese!' }, clientId: 'b2' });
+    // One tap: `final` locks the answer in straight away.
+    bea.socket.send({ type: 'SUBMIT', instanceId: gated.body.challenge.id, payload: { caption: 'Cheese!' }, clientId: 'b2', final: true });
     await bea.socket.next(ackOf('b2'));
-    bea.socket.send({ type: 'FINISH', instanceId: gated.body.challenge.id, clientId: 'b3' });
-    await bea.socket.next(ackOf('b3'));
+    await bea.socket.next((m) => snapshotOf(m)?.board[1]?.status === 'submitted');
 
     const judging = snapshotOf(await ada.socket.next((m) => (snapshotOf(m)?.judging.length ?? 0) > 0))!.judging[0]!;
     expect(JSON.stringify(judging.presentation)).toContain('Cheese!');
@@ -212,8 +216,15 @@ describe('REST + WebSocket API', () => {
     expect(JSON.stringify(snapshotOf(await bea.socket.next((m) => snapshotOf(m) !== null))!)).not.toContain(judging.assignmentId);
     bea.socket.send({ type: 'JUDGE', assignmentId: judging.assignmentId, decision: 'approve', clientId: 'b4' });
     expect(await bea.socket.next(ackOf('b4'))).toMatchObject({ ok: false }); // SR-11
+    const beforeJudge = bea.socket.messages.length;
     ada.socket.send({ type: 'JUDGE', assignmentId: judging.assignmentId, decision: 'approve', note: 'ha', clientId: 'c4' });
     expect(await ada.socket.next(ackOf('c4'))).toMatchObject({ ok: true });
+    // Scored, but Bea and the display learn nothing until the host reveals results.
+    const beaHidden = snapshotOf(await bea.socket.next((m) => bea.socket.messages.indexOf(m) >= beforeJudge && snapshotOf(m) !== null))!;
+    expect(beaHidden.board[1]).toMatchObject({ status: 'submitted', points: null });
+    expect(beaHidden.leaderboard.every((l) => l.total === 0)).toBe(true);
+    expect(bea.socket.messages.some((m) => m.type === 'EVENT' && m.event.type === 'PLAYER_SCORED')).toBe(false);
+    expect((await act({ action: 'reveal-results' })).status).toBe(200);
     const beaScored = snapshotOf(await bea.socket.next((m) => snapshotOf(m)?.board[1]?.status === 'scored'))!;
     expect(beaScored.board[1]!.points).toBe(10);
     expect(beaScored.leaderboard[0]).toMatchObject({ displayName: 'Bea', total: 10 });
@@ -246,7 +257,93 @@ describe('REST + WebSocket API', () => {
     const exported = await api<Record<string, unknown>>(`/api/games/${game.id}/export`, { token: hostToken });
     expect(JSON.stringify(exported.body)).not.toContain('TokenHash');
 
+    // Start over with the same setup, or continue the closed game.
+    expect((await api(`/api/games/${game.id}/duplicate`, { method: 'POST', body: '{}' })).status).toBe(401);
+    const copy = await api<{ game: { id: string; status: string }; hostToken: string; warnings: string[] }>(`/api/games/${game.id}/duplicate`, { method: 'POST', token: hostToken, body: '{}' });
+    expect(copy.status).toBe(201);
+    expect(copy.body.game.status).toBe('DRAFT');
+    const copySnap = (await api<{ snapshot: GameSnapshot }>(`/api/games/${copy.body.game.id}`, { token: copy.body.hostToken })).body.snapshot;
+    expect(copySnap.challenges).toHaveLength(2);
+    expect(copySnap.players).toEqual([]);
+    expect((await act({ action: 'reopen-game' })).status).toBe(200);
+    expect((await api(`/api/games/by-code/${game.code}`)).status).toBe(200);
+    const resumed = await api<{ playerId: string }>('/api/join/resume', { method: 'POST', body: JSON.stringify({ code: game.code, sessionToken: ada.sessionToken }) });
+    expect(resumed.body.playerId).toBe(ada.playerId); // players keep their place
+
     for (const s of [host, ada.socket, bea.socket, display]) s.ws.close();
+  });
+
+  it('exports a setup with its media and imports it as a new game', async () => {
+    const created = await api<{ game: { id: string }; hostToken: string }>('/api/games', { method: 'POST', body: JSON.stringify({ name: 'Backup me' }) });
+    const { game, hostToken } = created.body;
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 7)]);
+    const form = new FormData();
+    form.append('file', new Blob([png], { type: 'image/png' }), 'cat.png');
+    const uploaded = (await (await fetch(`${baseUrl}/api/games/${game.id}/media`, { method: 'POST', headers: { authorization: `Bearer ${hostToken}` }, body: form })).json()) as { ref: string };
+    const added = await api<{ challenge: { title: string; customTitle: string; category: string; allowReplay: boolean } }>(`/api/games/${game.id}/challenges`, {
+      method: 'POST',
+      token: hostToken,
+      body: JSON.stringify({ moduleId: 'caption-this', configuration: { image: uploaded.ref, prompt: 'Caption it', timeLimit: 60 }, title: 'Cat caption', category: 'Creativity', allowReplay: true }),
+    });
+    expect(added.body.challenge).toMatchObject({ title: 'Cat caption', customTitle: 'Cat caption', category: 'Creativity', allowReplay: true });
+
+    expect((await api(`/api/games/${game.id}/setup`)).status).toBe(401);
+    const exported = await fetch(`${baseUrl}/api/games/${game.id}/setup`, { headers: { authorization: `Bearer ${hostToken}` } });
+    expect(exported.headers.get('content-disposition')).toContain('Backup-me-setup.json');
+    const setup = (await exported.json()) as { challenges: { configuration: { image: string } }[]; media: Record<string, { data: string }> };
+    expect(Buffer.from(setup.media[uploaded.ref]!.data, 'base64').equals(png)).toBe(true);
+
+    const imported = await api<{ game: { id: string; name: string; status: string }; hostToken: string; warnings: string[] }>('/api/games/import', {
+      method: 'POST',
+      body: JSON.stringify({ setup }),
+    });
+    expect(imported.status).toBe(201);
+    expect(imported.body.game).toMatchObject({ name: 'Backup me', status: 'DRAFT' });
+    expect(imported.body.warnings).toEqual([]);
+    const copy = (await api<{ snapshot: GameSnapshot }>(`/api/games/${imported.body.game.id}`, { token: imported.body.hostToken })).body.snapshot;
+    const image = String(copy.challenges[0]!.configuration!.image);
+    expect(copy.challenges[0]).toMatchObject({ title: 'Cat caption', allowReplay: true });
+    expect(image).toMatch(/^media:\/\//);
+    expect(image).not.toBe(uploaded.ref); // a fresh copy of the file on this server
+    expect(Buffer.from(await (await fetch(`${baseUrl}/media/${image.slice('media://'.length)}`)).arrayBuffer()).equals(png)).toBe(true);
+
+    const invalid = await api<{ error: string }>('/api/games/import', { method: 'POST', body: JSON.stringify({ setup: { hello: 'world' } }) });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toMatch(/Not a valid setup file/);
+  });
+
+  it('in dev, sends pages opened on the game server to the dev web server', async () => {
+    const page = await fetch(`${baseUrl}/join/ABC123?x=1`, { redirect: 'manual' });
+    expect(page.status).toBe(302);
+    expect(page.headers.get('location')).toBe('http://127.0.0.1:5999/join/ABC123?x=1');
+    const missing = await api<{ error: string }>('/api/no-such-route');
+    expect(missing.status).toBe(404);
+  });
+
+  it('lists stored games with a host token only for the host machine', async () => {
+    const created = await api<{ game: { id: string }; hostToken: string }>('/api/games', { method: 'POST', body: JSON.stringify({ name: 'Lost token' }) });
+    const local = await api<{ games: { game: { id: string }; hostToken: string; challengeCount: number }[] }>('/api/local/games');
+    expect(local.status).toBe(200);
+    const entry = local.body.games.find((g) => g.game.id === created.body.game.id)!;
+    expect(entry.hostToken).not.toBe(created.body.hostToken);
+    expect((await api(`/api/games/${created.body.game.id}`, { token: entry.hostToken })).status).toBe(200);
+    expect((await api(`/api/games/${created.body.game.id}`, { token: `${entry.hostToken}x` })).status).toBe(401);
+    // Through a proxy that reports another device (as the Vite dev proxy does for phones) it is refused…
+    expect((await api('/api/local/games', { headers: { 'x-forwarded-for': '203.0.113.7' } })).status).toBe(403);
+    // …and so is a spoofed header when the proxy appends the real address last.
+    expect((await api('/api/local/games', { headers: { 'x-forwarded-for': '127.0.0.1, 192.0.2.4' } })).status).toBe(403);
+    expect((await api('/api/local/games', { headers: { 'x-forwarded-for': '127.0.0.1' } })).status).toBe(200);
+    // A foreign Host header (DNS rebinding) is refused too. (fetch cannot set Host, so use node:http.)
+    const { request } = await import('node:http');
+    const rebound = await new Promise<number>((resolve, reject) => {
+      const req = request(`${baseUrl}/api/local/games`, { headers: { host: 'evil.example' } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    expect(rebound).toBe(403);
   });
 
   it('kicks removed players and rejects malformed messages', async () => {

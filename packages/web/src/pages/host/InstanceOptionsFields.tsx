@@ -4,14 +4,30 @@ import { availabilityHelp, availabilityLabel, evaluationHelp, evaluationLabel } 
 const AVAILABILITIES: Availability[] = ['open', 'host-unlocked', 'assigned'];
 const ALL_MODES: EvaluationMode[] = ['automatic', 'peer', 'host', 'hybrid'];
 
-export const DEFAULT_OPTIONS: InstanceOptions = { availability: 'open', assignedPlayerIds: [], evaluationMode: null };
+export const DEFAULT_OPTIONS: InstanceOptions = { title: '', category: '', availability: 'open', assignedPlayerIds: [], evaluationMode: null, allowReplay: false };
+
+export const TITLE_MAX = 80;
+export const CATEGORY_MAX = 40;
 
 export function optionsOf(
-  inst: { availability: Availability; assignedPlayerIds?: string[]; evaluationMode?: EvaluationMode | null; evaluationModeOverride?: EvaluationMode | null } | undefined,
+  inst:
+    | {
+        customTitle?: string;
+        category?: string;
+        allowReplay?: boolean;
+        availability: Availability;
+        assignedPlayerIds?: string[];
+        evaluationMode?: EvaluationMode | null;
+        evaluationModeOverride?: EvaluationMode | null;
+      }
+    | undefined,
   moduleDefault?: EvaluationMode,
 ): InstanceOptions {
   if (!inst) return DEFAULT_OPTIONS;
   return {
+    title: inst.customTitle ?? '',
+    category: inst.category ?? '',
+    allowReplay: inst.allowReplay ?? false,
     availability: inst.availability,
     assignedPlayerIds: inst.assignedPlayerIds ?? [],
     // Host snapshots carry the explicit override; fall back to inferring it from the effective mode.
@@ -40,10 +56,69 @@ export interface InstanceOptionsFieldsProps {
   idPrefix?: string;
 }
 
-/** Engine-owned per-instance options (availability, assignees, evaluation override) — shared by add and edit. */
+/** The title and category players see first: shown above the module configuration. */
+export function TitleField({
+  value,
+  onChange,
+  module,
+  categories = [],
+  disabled = false,
+  idPrefix = 'opt',
+}: Omit<InstanceOptionsFieldsProps, 'players'> & { categories?: string[] }) {
+  return (
+    <div className="title-fields">
+      <div className="form-field">
+        <label className="field-label" htmlFor={`${idPrefix}-title`}>
+          Title
+        </label>
+        <input
+          id={`${idPrefix}-title`}
+          className="input input-lg"
+          type="text"
+          maxLength={TITLE_MAX}
+          value={value.title}
+          disabled={disabled}
+          placeholder={module?.manifest.name ?? 'Challenge title'}
+          onChange={(e) => onChange({ ...value, title: e.target.value })}
+        />
+        <p className="field-help">What players see on the tile. Leave empty to show “{module?.manifest.name ?? 'the module name'}”.</p>
+      </div>
+      <div className="form-field">
+        <label className="field-label" htmlFor={`${idPrefix}-category`}>
+          Category
+        </label>
+        <input
+          id={`${idPrefix}-category`}
+          className="input input-lg"
+          type="text"
+          maxLength={CATEGORY_MAX}
+          value={value.category}
+          disabled={disabled}
+          placeholder="e.g. Intelligence"
+          list={`${idPrefix}-categories`}
+          onChange={(e) => onChange({ ...value, category: e.target.value })}
+        />
+        <datalist id={`${idPrefix}-categories`}>
+          {categories.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+        <p className="field-help">Players' boards group challenges by category. Optional.</p>
+      </div>
+    </div>
+  );
+}
+
+/** The game's categories in board order, for suggestions. */
+export function categoriesOf(challenges: { category: string }[]): string[] {
+  return [...new Set(challenges.map((c) => c.category).filter(Boolean))];
+}
+
+/** Engine-owned per-instance options (replays, availability, assignees, evaluation override) — shared by add and edit. */
 export function InstanceOptionsFields({ value, onChange, players, module, disabled = false, idPrefix = 'opt' }: InstanceOptionsFieldsProps) {
   const supported = supportedModesOf(module);
   const moduleDefault = module?.manifest.evaluation.mode;
+  const replayable = module === undefined || module.manifest.results === 'immediate';
   const togglePlayer = (id: string) => {
     const set = new Set(value.assignedPlayerIds);
     if (set.has(id)) set.delete(id);
@@ -54,6 +129,33 @@ export function InstanceOptionsFields({ value, onChange, players, module, disabl
   return (
     <fieldset className="stack gap-md instance-options" disabled={disabled}>
       <legend className="section-title">Instance options</legend>
+
+      <div className="form-field">
+        {module?.manifest.attempts === 'repeat' ? (
+          <p className="field-help">Players take part again and again by design (one turn at a time); every contribution scores.</p>
+        ) : replayable ? (
+          <>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={value.allowReplay}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...value, allowReplay: e.target.checked })}
+              />
+              <span className="toggle-track" aria-hidden="true">
+                <span className="toggle-thumb" />
+              </span>
+              <span className="toggle-label">
+                Players may play it again to improve <span className="muted">({value.allowReplay ? 'on' : 'off'})</span>
+              </span>
+            </label>
+            <p className="field-help">Only each player's best attempt counts. Good for skill challenges.</p>
+          </>
+        ) : (
+          <p className="field-help">This challenge scores everyone together when you close it, so each player plays it once.</p>
+        )}
+      </div>
 
       <div className="form-field">
         <span className="field-label" id={`${idPrefix}-availability-label`}>

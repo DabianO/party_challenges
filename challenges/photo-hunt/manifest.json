@@ -1,7 +1,7 @@
 {
   "id": "photo-hunt",
   "name": "Photo Hunt",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": "2",
   "category": "chaos",
   "description": "Race to take a photo that matches the task. Another player checks that it really shows what was asked.",

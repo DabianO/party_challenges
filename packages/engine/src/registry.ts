@@ -53,8 +53,12 @@ export function validateManifest(m: unknown, source: string): Manifest {
   if (results === 'onClose' && supported.some((m) => m !== 'automatic')) {
     throw new ModuleLoadError(`${source}: onClose modules only support automatic evaluation`);
   }
+  const attempts = (man.attempts as string | undefined) ?? 'once';
+  if (!['once', 'repeat'].includes(attempts)) throw new ModuleLoadError(`${source}: manifest.attempts must be once | repeat`);
+  if (attempts === 'repeat' && results !== 'immediate') throw new ModuleLoadError(`${source}: attempts "repeat" requires results "immediate"`);
   return {
     ...(man as unknown as Manifest),
+    attempts: attempts as Manifest['attempts'],
     players: (man.players as Manifest['players']) ?? { min: 1, max: null },
     duration: (man.duration as Manifest['duration']) ?? { typicalSeconds: 60 },
     evaluation: {
@@ -91,6 +95,9 @@ export function validateModule(mod: unknown, source: string): AnyModule {
   if ((typeof m.hostResolutionView === 'function') !== (typeof m.applyHostResolution === 'function')) {
     throw new ModuleLoadError(`${source}: hostResolutionView() and applyHostResolution() must be implemented together`);
   }
+  if ((typeof m.validateAction === 'function') !== (typeof m.onAction === 'function')) {
+    throw new ModuleLoadError(`${source}: validateAction() and onAction() must be implemented together`);
+  }
   if (!m.configurationSchema || typeof m.configurationSchema !== 'object') {
     throw new ModuleLoadError(`${source}: configurationSchema must be a JSON Schema object`);
   }
@@ -99,7 +106,8 @@ export function validateModule(mod: unknown, source: string): AnyModule {
 
 /**
  * Challenge Library (spec §6): the catalog of installed modules. Multiple versions of
- * the same module may be installed side by side; games pin exact versions (MR-15).
+ * the same module may be installed side by side; games pin exact versions (MR-15), and
+ * move to a newer minor of the same major only when the pinned one is gone (`compatible`).
  */
 export class ModuleRegistry {
   private readonly byKey = new Map<string, LoadedModule>();
@@ -117,6 +125,20 @@ export class ModuleRegistry {
   /** Exact version lookup (used by running games). */
   get(id: string, version: string): LoadedModule | undefined {
     return this.byKey.get(`${id}@${version}`);
+  }
+
+  /**
+   * Newest installed version with the same major as `version` and not older than it.
+   * Minor/patch releases must stay state-compatible, so games pinned to an older minor
+   * move up to it when the exact pinned version is no longer installed.
+   */
+  compatible(id: string, version: string): LoadedModule | undefined {
+    const major = version.split('.')[0];
+    const candidates = [...this.byKey.values()].filter(
+      (m) => m.manifest.id === id && m.manifest.version.split('.')[0] === major && compareSemver(m.manifest.version, version) >= 0,
+    );
+    candidates.sort((a, b) => compareSemver(b.manifest.version, a.manifest.version));
+    return candidates[0];
   }
 
   /** Latest installed version of a module (used when hosts add new instances). */

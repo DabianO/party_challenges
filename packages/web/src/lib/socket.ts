@@ -32,8 +32,10 @@ export interface GameSocket {
   clockOffset: number;
   /** Player: start an attempt on a board challenge. */
   start(instanceId: string): Promise<AckResult>;
-  /** Player: submit (or replace) an answer. */
-  submit(instanceId: string, payload: unknown): Promise<AckResult>;
+  /** Player: submit (or replace) an answer; `final` locks it in right away. */
+  submit(instanceId: string, payload: unknown, final?: boolean): Promise<AckResult>;
+  /** Player: a live action (e.g. a batch of taps) for the module; not a submission. */
+  action(instanceId: string, payload: unknown): Promise<AckResult>;
   /** Player: lock the attempt early when the module allows resubmission. */
   finish(instanceId: string): Promise<AckResult>;
   /** Player: decide a judging task. */
@@ -246,10 +248,15 @@ export function useGameSocket(params: SocketParams | null): GameSocket {
 
   const start = useCallback((instanceId: string) => sendAcked((clientId) => ({ type: 'START', instanceId, clientId })), [sendAcked]);
   const submit = useCallback(
-    (instanceId: string, payload: unknown) => sendAcked((clientId) => ({ type: 'SUBMIT', instanceId, payload, clientId })),
+    (instanceId: string, payload: unknown, final = false) =>
+      sendAcked((clientId) => (final ? { type: 'SUBMIT', instanceId, payload, clientId, final: true } : { type: 'SUBMIT', instanceId, payload, clientId })),
     [sendAcked],
   );
   const finish = useCallback((instanceId: string) => sendAcked((clientId) => ({ type: 'FINISH', instanceId, clientId })), [sendAcked]);
+  const action = useCallback(
+    (instanceId: string, payload: unknown) => sendAcked((clientId) => ({ type: 'ACTION', instanceId, payload, clientId })),
+    [sendAcked],
+  );
   const judge = useCallback(
     (assignmentId: string, decision: 'approve' | 'reject', note?: string) =>
       sendAcked((clientId) => {
@@ -265,7 +272,7 @@ export function useGameSocket(params: SocketParams | null): GameSocket {
   }, []);
 
   return useMemo(
-    () => ({ snapshot, status, error, fatal, lastEvent, clockOffset, start, submit, finish, judge, resync }),
-    [snapshot, status, error, fatal, lastEvent, clockOffset, start, submit, finish, judge, resync],
+    () => ({ snapshot, status, error, fatal, lastEvent, clockOffset, start, submit, action, finish, judge, resync }),
+    [snapshot, status, error, fatal, lastEvent, clockOffset, start, submit, action, finish, judge, resync],
   );
 }

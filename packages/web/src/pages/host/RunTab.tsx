@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { HostAction } from '@challenge/contract';
 import { ActivityFeed } from '../../components/ActivityFeed';
 import { Leaderboard } from '../../components/Leaderboard';
+import { ProgressChart } from '../../components/ProgressChart';
 import { StatusBadge } from '../../components/PhaseBadge';
 import { QrCode } from '../../components/QrCode';
 import { AttentionPanel, attentionCount } from './AttentionPanel';
@@ -10,6 +11,8 @@ import { ChallengeControls, type Act } from './ChallengeControls';
 import { EvaluationsPanel } from './EvaluationsPanel';
 import type { HostCtx } from './hostApi';
 import { PlayerList } from './PlayerList';
+import { StartOverButton } from './StartOverButton';
+import { relativeTime, useNow } from '../../lib/time';
 
 export function RunTab({ ctx }: { ctx: HostCtx }) {
   const { snapshot } = ctx;
@@ -48,8 +51,8 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
             {game.status === 'DRAFT' && 'Draft — add challenges, then open the lobby'}
             {game.status === 'LOBBY' && `Lobby open — ${players.length} ${players.length === 1 ? 'player' : 'players'} joined`}
             {game.status === 'IN_PROGRESS' && `Board open — ${challenges.filter((c) => c.phase === 'ACTIVE').length} of ${challenges.length} challenges playable`}
-            {game.status === 'GAME_RESULTS' && 'Final results are on the big screen'}
-            {game.status === 'FINISHED' && 'Finished — the join code no longer works'}
+            {game.status === 'GAME_RESULTS' && (game.resultsRevealed ? 'Final results are on the big screen' : 'Game over — reveal the results when you are ready')}
+            {game.status === 'FINISHED' && 'Closed — the join code no longer works. Continue it or start a new game with this setup.'}
           </strong>
         </div>
         <div className="row gap-sm wrap align-center">
@@ -100,11 +103,56 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
             </button>
           )}
           {finished && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() =>
+                void act(
+                  { action: 'reopen-game' },
+                  'Continue this game? It goes back to in progress with all players and points kept; players can rejoin with the same code. Reopen the challenges they should play.',
+                )
+              }
+            >
+              ▶ Continue this game
+            </button>
+          )}
+          {finished && <StartOverButton ctx={ctx} />}
+          {finished && (
             <Link className="btn btn-secondary" to={`/results/${ctx.gameId}`} target="_blank">
               Public results page ↗
             </Link>
           )}
         </div>
+        {running && <BigScreenPanel ctx={ctx} busy={busy} onUpdate={() => void act({ action: 'publish-standings' })} />}
+        {(running || finished) && (
+          <div className={`reveal-panel${game.resultsRevealed ? ' is-revealed' : ''}`}>
+            <span className="grow stack gap-xs">
+              <strong>{game.resultsRevealed ? '★ Results are visible to everyone' : '🙈 Results are hidden'}</strong>
+              <span className="muted small">
+                {game.resultsRevealed
+                  ? 'Players see their points and answers; the big screen shows the leaderboard.'
+                  : 'Players only see which challenges they finished. You see all scores here.'}
+              </span>
+            </span>
+            {game.resultsRevealed ? (
+              game.status !== 'FINISHED' && (
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act({ action: 'hide-results' })}>
+                  Hide again
+                </button>
+              )
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-lg"
+                disabled={busy}
+                onClick={() => void act({ action: 'reveal-results' }, 'Reveal all results now? Every player sees what they got right and the big screen shows the leaderboard.')}
+              >
+                ★ Reveal results
+              </button>
+            )}
+          </div>
+        )}
         {game.status !== 'FINISHED' && (
           <div className="join-panel">
             <QrCode value={joinUrl} size={132} />
@@ -147,6 +195,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         <section className="stack gap-sm">
           <h2 className="section-title">Leaderboard</h2>
           <Leaderboard entries={leaderboard} showCompleted />
+          <ProgressChart entries={leaderboard} playerOrder={players.map((p) => p.id)} challengeCount={challenges.length} />
         </section>
       )}
 
@@ -158,6 +207,31 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         <h2 className="section-title">Activity</h2>
         <ActivityFeed items={activity} clockOffset={ctx.clockOffset} limit={40} />
       </section>
+    </div>
+  );
+}
+
+/** The big screen only shows the race as of the last update, so the host decides when it changes. */
+function BigScreenPanel({ ctx, busy, onUpdate }: { ctx: HostCtx; busy: boolean; onUpdate: () => void }) {
+  const { standings, standingsFeed } = ctx.snapshot;
+  const now = useNow(5000) + ctx.clockOffset;
+  const latest = standings ? standingsFeed.filter((f) => f.at === standings.publishedAt) : [];
+  return (
+    <div className="screen-panel">
+      <span className="grow stack gap-xs">
+        <strong>📺 Big screen: {standings ? `race as of ${relativeTime(standings.publishedAt, now)}` : 'race not shown yet'}</strong>
+        <span className="muted small">
+          {standings
+            ? latest.length
+              ? `Last update: ${latest.map((f) => f.text).join(' · ')}.`
+              : 'Last update: no changes in the ranking.'
+            : 'Press update to put the current standings and graph on the big screen.'}{' '}
+          Phones are not affected.
+        </span>
+      </span>
+      <button type="button" className="btn btn-primary" disabled={busy} onClick={onUpdate}>
+        ↻ Update the big screen
+      </button>
     </div>
   );
 }

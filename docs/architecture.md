@@ -5,17 +5,32 @@ specification's requirements to their implementation.
 
 ## 1. The game model: a self-paced board
 
-The host assembles a **board** of challenge instances. Players open any challenge that is
-available to them, press **Start**, play it with their own timers, and submit. There is no
-host-driven "current question": each player's run of a challenge is an **attempt**, and
-evaluation happens per attempt (or, for aggregate challenges, when the host closes the
-challenge). The main display shows the leaderboard, the board with statistics, a live
-activity feed and the results of closed challenges.
+The host assembles a **board** of challenge instances, each with an optional title that
+players see instead of the module name and an optional category (players' boards group
+challenges by category, in board order; uncategorised ones come last). Players tap any challenge that is available to
+them (that starts it straight away), play it with their own timers, and lock in their
+answer with one action, which returns them to the board. There is no host-driven "current
+question": each player's run of a challenge is an **attempt**, and evaluation happens per
+attempt (or, for aggregate challenges, when the host closes the challenge). The main
+display shows player progress (or, once revealed, the leaderboard), the board with
+statistics, a live activity feed and the results of closed challenges.
+
+**Hidden results.** Every game starts with results hidden: players and the main display
+learn who finished what, but no points, ranks or per-challenge results. The host sees
+everything and presses *Reveal results* (`reveal-results`) when it is time; closing the
+game reveals them too. Masking happens only in the audience-scoped snapshot builders, so
+modules are unaware of it.
+
+**Replays.** An `immediate` instance can allow replays (`allowReplay`): a player may start
+new attempts after finishing one. Each attempt is evaluated and recorded on its own; an
+adjustment row (`[best:<player>]`) keeps the player's ledger total for the instance equal
+to their best attempt, and `getStatistics`/`resultsView` see only that best attempt.
+Overrides re-settle the best, so the ledger stays append-only.
 
 ```text
 Instance (engine-owned):  PENDING ─▶ ACTIVE ─▶ LOCKED ─▶ [EVALUATING] ─▶ RESULTS
                           ▲ host unlocks  │ host closes   │ host resolution (onClose)
-Attempt (per player):     Start ─▶ input open ─▶ locked ─▶ evaluated ─▶ scored
+Attempt (per player):     Start ─▶ input open ─▶ locked ─▶ evaluated ─▶ scored   (─▶ Start again, with replays)
                                    (timer / submit / Finish / instance closed)
 ```
 
@@ -100,7 +115,8 @@ packages/web                 React: /host, /display/:code, /join/:code, /results
 | FR-35–39 real-time | `/ws`, `ConnectionHub`, audience-scoped snapshots, `seq`, `MODULE_EVENT` |
 | FR-40–43 ledger & leaderboard | `writeAwards`/`reverseAwards` (append-only), `computeLeaderboard`, `adjust-score` |
 | FR-44–45 statistics | module `getStatistics(evaluations)`; `computeGenericStatistics` |
-| FR-46–47 data model | `packages/server/src/sqlite.ts` (games, players, instances, attempts, submissions, evaluation_assignments, score_awards, media) |
+| FR-46–47 data model | `packages/server/src/sqlite.ts` (games, players, instances, attempts, submissions, evaluation_assignments, score_awards, media); every commit is saved automatically to `DATA_DIR/platform.sqlite` |
+| Setup backup | `GET /api/games/:id/setup` (`exportSetupWithMedia`, media embedded) and `POST /api/games/import` (`Engine.importSetup`); host machine lists stored games via `GET /api/local/games` with host-key-derived tokens |
 | FR-50–52 failure handling | timers keep running without the host; `restoreAfterRestart`; `callModule` + `MODULE_ERROR` + `retry-evaluation` |
 | FR-56–59, FR-69 media & evidence | `MediaService`, `POST /api/games/:id/media`, `POST /api/evidence`, `file-input` node |
 | SR-1–4 | server-authoritative runtime; `submit()` checks attempt state, rate limit, then module validation |

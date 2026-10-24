@@ -4,12 +4,15 @@ import type {
   ChallengeResults,
   CreateGameResponse,
   GameSettings,
+  GameSetup,
   GameSnapshot,
   GameSummary,
   HostAction,
+  ImportSetupResponse,
   InstanceOptions,
   JoinResponse,
   LeaderboardEntry,
+  LocalGameInfo,
   ModuleInfo,
   PlayerPublic,
   PublicGameInfo,
@@ -109,6 +112,19 @@ export const api = {
   modules: () => request<{ modules: ModuleInfo[] }>('/api/modules').then((r) => r.modules),
 
   createGame: (body: { name: string; hostPassword?: string }) => request<CreateGameResponse>('/api/games', { body }),
+
+  /** The game's configuration (board, settings, branding, media) as a JSON backup. */
+  exportSetup: (id: string, token: string) => request<GameSetup>(`/api/games/${id}/setup`, { token }),
+
+  /** New DRAFT game with this game's setup (no players or scores). */
+  duplicateGame: (id: string, token: string) => request<ImportSetupResponse>(`/api/games/${id}/duplicate`, { method: 'POST', token }),
+
+  /** New game from a setup backup. */
+  importSetup: (setup: unknown, hostPassword?: string) =>
+    request<ImportSetupResponse>('/api/games/import', { body: hostPassword ? { setup, hostPassword } : { setup } }),
+
+  /** Every game stored on the server, with host tokens — answered only for a browser on the host machine. */
+  localGames: () => request<{ games: LocalGameInfo[] }>('/api/local/games').then((r) => r.games),
 
   getGame: (id: string, token: string) => request<{ snapshot: GameSnapshot }>(`/api/games/${id}`, { token }).then((r) => r.snapshot),
 

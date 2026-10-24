@@ -1,7 +1,7 @@
 {
   "id": "multiple-choice",
   "name": "Multiple Choice",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "apiVersion": "2",
   "category": "knowledge",
   "description": "Pick one of up to six options. Correct answers score fixed points with an optional speed bonus.",

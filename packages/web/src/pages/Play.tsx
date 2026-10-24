@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { GameSnapshot } from '@challenge/contract';
 import { Banner, ConnectionBanner, PausedBanner } from '../components/Banner';
@@ -64,6 +64,12 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
       case 'CHALLENGE_UNLOCKED':
         toast('A new challenge is available', 'info');
         break;
+      case 'GAME_REOPENED':
+        toast('The game continues!', 'success');
+        break;
+      case 'RESULTS_REVEALED':
+        toast('Results are in! Tap a challenge to see how you did', 'success');
+        break;
       case 'PLAYER_SCORED':
         if (payload.playerId === meId && typeof payload.points === 'number') {
           toast(`${payload.points >= 0 ? '+' : '−'}${formatPoints(Math.abs(payload.points))} pts`, payload.points >= 0 ? 'success' : 'warning');
@@ -77,6 +83,17 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   useEffect(() => {
     if (sock.error) toast(sock.error, 'danger');
   }, [sock.error, toast]);
+
+  // Turn-based challenges: tell the player when a challenge they were waiting for is theirs to play.
+  const waitingRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!snapshot) return;
+    const waiting = waitingRef.current;
+    for (const b of snapshot.board) {
+      if (b.status === 'waiting') waiting.add(b.instanceId);
+      else if (waiting.delete(b.instanceId) && b.status === 'available') toast(`${b.title}: ${b.statusText ?? "it's your turn!"}`, 'success');
+    }
+  }, [snapshot, toast]);
 
   const uploadEvidence = useCallback<EvidenceUploader>(
     async (file) => {
@@ -156,7 +173,7 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
           <span>
             You: <strong>{displayName}</strong>
           </span>
-          {mine && snapshot && snapshot.game.status !== 'LOBBY' && (
+          {mine && snapshot && snapshot.game.status !== 'LOBBY' && snapshot.game.resultsRevealed && (
             <span className="play-rank" aria-label={`Rank ${mine.rank} of ${snapshot.leaderboard.length}, ${formatPoints(mine.total)} points`}>
               #{mine.rank}
               <span className="muted">/{snapshot.leaderboard.length}</span> · {formatPoints(mine.total)} pts

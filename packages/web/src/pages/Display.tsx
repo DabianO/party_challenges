@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { ChallengeInstanceSummary, ChallengeResults, GameSnapshot, LeaderboardEntry } from '@challenge/contract';
-import { ActivityFeed } from '../components/ActivityFeed';
-import { Leaderboard, rankClass } from '../components/Leaderboard';
-import { EvaluationBadge, PhaseBadge } from '../components/PhaseBadge';
+import type { GameSnapshot, LeaderboardEntry } from '@challenge/contract';
+import { ConnectionDot, Leaderboard, rankClass } from '../components/Leaderboard';
+import { ProgressChart } from '../components/ProgressChart';
 import { QrCode } from '../components/QrCode';
 import { UIView } from '../components/UIRenderer';
 import { useBranding } from '../lib/branding';
 import { resolveMedia } from '../lib/media';
 import { useGameSocket } from '../lib/socket';
-import { formatPoints } from '../lib/time';
+import { formatPoints, relativeTime, useNow } from '../lib/time';
 import { normaliseCode } from './Landing';
 
 const CURSOR_HIDE_MS = 4000;
-const SPOTLIGHT_MS = 15000;
 
 function useIdleCursor(): boolean {
   const [idle, setIdle] = useState(false);
@@ -174,115 +172,97 @@ function Lobby({ snapshot }: { snapshot: GameSnapshot }) {
 // Live dashboard
 // ---------------------------------------------------------------------------
 
-function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOffset: number }) {
-  const { leaderboard, challenges, activity, results, players } = snapshot;
-  const withResults = challenges.filter((c) => c.phase === 'RESULTS' && results[c.id]);
+/** Before results are revealed: who has finished how many challenges, no points or ranks. */
+function Progress({ entries, total, limit }: { entries: LeaderboardEntry[]; total: number; limit: number }) {
+  if (entries.length === 0) return <p className="display-p muted">No players yet.</p>;
   return (
-    <div className="dash">
-      <section className="dash-col dash-leaderboard" aria-label="Leaderboard">
-        <h2 className="display-h2">Leaderboard</h2>
-        {leaderboard.length === 0 ? (
-          <p className="display-p muted">{players.length} players, no points yet.</p>
-        ) : (
-          <Leaderboard entries={leaderboard} limit={10} showDelta showConnection showCompleted size="lg" />
-        )}
-        {leaderboard.length > 10 && <p className="muted">+{leaderboard.length - 10} more players</p>}
-      </section>
+    <ol className="progress-list" aria-label="Player progress">
+      {entries.slice(0, limit).map((e) => (
+        <li key={e.playerId} className="progress-row">
+          <ConnectionDot connected={e.connected} />
+          <span className="progress-name">{e.displayName}</span>
+          <span className="progress-count mono">
+            <span aria-hidden="true">✓</span> {e.completed}
+            <span className="muted">/{total}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
-      <section className="dash-col dash-board" aria-label="Challenge board">
-        <h2 className="display-h2">
-          Challenges <span className="muted">({challenges.length})</span>
-        </h2>
-        <ul className="plain-list dash-cards">
-          {challenges.map((c) => (
-            <DisplayChallengeCard key={c.id} c={c} playerCount={players.length} hasResults={Boolean(results[c.id])} />
+/**
+ * The big screen during the game: the points race as the host last published it
+ * ("Update the big screen" in the Run tab).
+ */
+function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOffset: number }) {
+  const { standings, players, challenges } = snapshot;
+  const now = useNow(5000) + clockOffset;
+  // Live big-screen panels from challenges (e.g. Blob War) take the right half of the screen.
+  const panels = challenges.filter((c) => c.displayPanel);
+  return (
+    <div className={`race${panels.length ? ' has-panels' : ''}`}>
+      <section className="race-main" aria-label="The race">
+        <div className="race-head">
+          <h2 className="display-h2">The race</h2>
+          {standings && <span className="race-updated muted">Updated {relativeTime(standings.publishedAt, now)}</span>}
+        </div>
+        <div className="race-chart">
+          {standings ? (
+            <ProgressChart
+              key={standings.publishedAt}
+              entries={standings.entries}
+              playerOrder={players.map((p) => p.id)}
+              challengeCount={challenges.length}
+              size="lg"
+              fillHeight
+              animate
+              showRank
+            />
+          ) : (
+            <div className="race-empty">
+              <span className="race-empty-icon" aria-hidden="true">
+                🏁
+              </span>
+              <p className="display-p">The race is on!</p>
+              <p className="display-p muted">
+                {players.length} {players.length === 1 ? 'player' : 'players'} · the standings appear here when the host updates the scoreboard
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+      {panels.length > 0 && (
+        <div className="race-side">
+          {panels.map((c) => (
+            <section key={c.id} className="race-panel" aria-label={c.title}>
+              <h2 className="display-h2">{c.title}</h2>
+              <div className="race-panel-body">
+                <UIView node={c.displayPanel} />
+              </div>
+            </section>
           ))}
-        </ul>
-        {withResults.length > 0 && <Spotlight instances={withResults} results={results} />}
-      </section>
-
-      <section className="dash-col dash-activity" aria-label="Live activity">
-        <h2 className="display-h2">Live</h2>
-        <ActivityFeed items={activity} clockOffset={clockOffset} limit={14} size="lg" emptyText="Waiting for the first move…" />
-      </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function DisplayChallengeCard({ c, playerCount, hasResults }: { c: ChallengeInstanceSummary; playerCount: number; hasResults: boolean }) {
-  const secret = c.availability === 'assigned';
-  const s = c.stats;
+/** Closing pictures from challenges with a big-screen panel (e.g. Blob War's territory map). */
+function Artworks({ snapshot }: { snapshot: GameSnapshot }) {
+  const art = snapshot.challenges.filter((c) => c.displayPanel);
+  if (art.length === 0) return null;
   return (
-    <li className={`dash-card phase-${c.phase}${secret ? ' is-secret' : ''}`}>
-      <div className="dash-card-head">
-        <PhaseBadge phase={c.phase} />
-        {!secret && <span className="badge tone-muted">{c.moduleCategory}</span>}
-      </div>
-      <h3 className="dash-card-title">{secret ? 'Secret challenge' : c.moduleName}</h3>
-      {secret ? (
-        <p className="muted dash-card-desc">
-          <span aria-hidden="true">🎯</span> Assigned to selected players
-        </p>
-      ) : (
-        <p className="muted dash-card-desc">{c.moduleDescription}</p>
-      )}
-      <div className="dash-card-foot">
-        <EvaluationBadge mode={c.evaluationMode} short />
-        {c.phase !== 'PENDING' && (
-          <span className="dash-stats mono" aria-label={`${s.started} started, ${s.submitted} submitted, ${s.scored} scored`}>
-            <span title="Started">▶ {s.started}</span>
-            <span title="Submitted">📨 {s.submitted}</span>
-            <span title="Scored">🏅 {s.scored}</span>
-            {playerCount > 0 && <span className="muted">/ {playerCount}</span>}
-          </span>
-        )}
-      </div>
-      {c.phase !== 'PENDING' && (s.averagePoints !== null || s.bestPoints !== null) && (
-        <p className="dash-points mono muted">
-          {s.averagePoints !== null && <span>avg {formatPoints(s.averagePoints)}</span>}
-          {s.bestPoints !== null && <span>best {formatPoints(s.bestPoints)}</span>}
-        </p>
-      )}
-      {hasResults && (
-        <p className="dash-card-results">
-          <span aria-hidden="true">★</span> Results below
-        </p>
-      )}
-    </li>
-  );
-}
-
-/** Rotates through the shared results of closed challenges. */
-function Spotlight({ instances, results }: { instances: ChallengeInstanceSummary[]; results: Record<string, ChallengeResults> }) {
-  const [index, setIndex] = useState(0);
-  const count = instances.length;
-  useEffect(() => {
-    if (count <= 1) return;
-    const id = window.setInterval(() => setIndex((i) => (i + 1) % count), SPOTLIGHT_MS);
-    return () => window.clearInterval(id);
-  }, [count]);
-  const current = instances[Math.min(index, count - 1)];
-  const res = current ? results[current.id] : undefined;
-  if (!current || !res) return null;
-  return (
-    <section className="spotlight" aria-live="polite" aria-label="Challenge results">
-      <div className="spotlight-head">
-        <p className="display-eyebrow">
-          <span aria-hidden="true">★</span> Results · {current.moduleName}
-        </p>
-        {count > 1 && (
-          <span className="spotlight-dots" aria-label={`${index + 1} of ${count}`}>
-            {instances.map((inst, i) => (
-              <span key={inst.id} className={`spotlight-dot${i === index ? ' is-active' : ''}`} aria-hidden="true" />
-            ))}
-            <span className="muted mono small">
-              {index + 1}/{count}
-            </span>
-          </span>
-        )}
-      </div>
-      <UIView key={`${current.id}-spotlight`} node={res.ui} className="ui-display ui-display-compact" />
-    </section>
+    <>
+      {art.map((c) => (
+        <section key={c.id} className="artwork" aria-label={c.title}>
+          <p className="display-eyebrow">{c.title}</p>
+          <div className="artwork-body">
+            <UIView node={c.displayPanel} />
+          </div>
+        </section>
+      ))}
+    </>
   );
 }
 
@@ -313,8 +293,22 @@ function Podium({ entries }: { entries: LeaderboardEntry[] }) {
 function Final({ snapshot }: { snapshot: GameSnapshot }) {
   const { game, leaderboard, challenges, results } = snapshot;
   const withResults = challenges.filter((c) => results[c.id]);
+  if (!game.resultsRevealed) {
+    return (
+      <div className="stack gap-lg">
+        <Artworks snapshot={snapshot} />
+        <div className="display-center">
+          <p className="display-eyebrow">That's a wrap</p>
+          <h1 className="display-h1">{game.name}</h1>
+          <p className="display-p muted">The results are about to be revealed…</p>
+          <Progress entries={leaderboard} total={challenges.length} limit={20} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="stack gap-lg">
+      <Artworks snapshot={snapshot} />
       <div className="display-split">
         <div className="display-center">
           <p className="display-eyebrow">Final results</p>
@@ -327,13 +321,17 @@ function Final({ snapshot }: { snapshot: GameSnapshot }) {
           <Leaderboard entries={leaderboard} showDelta={false} showConnection={false} showCompleted size="lg" />
         </aside>
       </div>
+      <section className="card stack gap-sm" aria-label="Points race">
+        <h2 className="display-h2">The race</h2>
+        <ProgressChart entries={leaderboard} playerOrder={snapshot.players.map((p) => p.id)} challengeCount={challenges.length} size="lg" height={420} />
+      </section>
       {withResults.length > 0 && (
         <section className="stack gap-md">
           <h2 className="display-h2">Challenge results</h2>
           <div className="results-grid">
             {withResults.map((c) => (
               <article key={c.id} className="card results-card">
-                <p className="display-eyebrow">{c.moduleName}</p>
+                <p className="display-eyebrow">{c.title}</p>
                 <UIView key={`${c.id}-final`} node={results[c.id]!.ui} className="ui-display ui-display-compact" />
               </article>
             ))}

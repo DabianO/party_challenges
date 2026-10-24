@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": ["question", "answers"],
+  "properties": {
+    "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
+    "answers": {
+      "type": "array",
+      "title": "Answers",
+      "description": "Between 2 and 12. The label (optional) is shown above the answer box, e.g. \"Capital of France\". Alternatives: other accepted spellings, separated by commas.",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["answer"],
+        "properties": {
+          "label": { "type": "string", "title": "Label", "maxLength": 100 },
+          "answer": { "type": "string", "title": "Correct answer", "minLength": 1, "maxLength": 100 },
+          "alternatives": { "type": "string", "title": "Alternatives", "maxLength": 300 }
+        }
+      }
+    },
+    "anyOrder": { "type": "boolean", "title": "Answers may be given in any order", "default": false },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 15, "maximum": 600, "default": 60 },
+    "points": { "type": "integer", "title": "Points for all answers correct", "minimum": 1, "maximum": 1000, "default": 10 }
+  }
+}

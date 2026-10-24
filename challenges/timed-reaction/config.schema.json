@@ -25,7 +25,30 @@
       "maximum": 10,
       "default": 4
     },
-    "maxPoints": { "type": "integer", "title": "Points for the fastest tap", "minimum": 1, "maximum": 1000, "default": 10 },
+    "maxPoints": {
+      "type": "integer",
+      "title": "Points for the fastest tap",
+      "description": "Taps lose one point per equal step of time between the two reaction times below.",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 10
+    },
+    "fullPointsMs": {
+      "type": "integer",
+      "title": "Full points up to (ms)",
+      "description": "Reaction times up to this earn the maximum. Measured on the server, so it includes the Wi-Fi delay.",
+      "minimum": 0,
+      "maximum": 2000,
+      "default": 200
+    },
+    "zeroPointsMs": {
+      "type": "integer",
+      "title": "No points from (ms)",
+      "description": "Reaction times from this on earn 0 points.",
+      "minimum": 100,
+      "maximum": 5000,
+      "default": 500
+    },
     "falseStartPenalty": {
       "type": "integer",
       "title": "False start penalty",
