@@ -1,4 +1,5 @@
 import type { PlayCtx } from '../Play';
+import { AvatarEditor } from './AvatarEditor';
 
 export function LobbyScreen({ ctx }: { ctx: PlayCtx }) {
   const { game, players, challenges } = ctx.snapshot;
@@ -16,6 +17,10 @@ export function LobbyScreen({ ctx }: { ctx: PlayCtx }) {
           </span>
         </p>
         {game.branding.introText && <p className="intro-text">{game.branding.introText}</p>}
+      </div>
+
+      <div className="card">
+        <AvatarEditor ctx={ctx} />
       </div>
 
       {challenges.length > 0 && (

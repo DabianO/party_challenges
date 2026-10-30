@@ -38,7 +38,7 @@ function contribute(state: ReturnType<typeof mod.createInstance>, ctx: InstanceC
 
 describe('group-message', () => {
   it('has a consistent manifest: automatic, immediate, repeated attempts', () => {
-    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.0.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.1.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -47,7 +47,7 @@ describe('group-message', () => {
     const state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
     expect(state.turn).toMatchObject({ playerId: 'p1', displayName: 'Ada' });
     expect(scheduled).toEqual([{ tag: 'turn', seconds: 300, playerId: undefined }]);
-    expect(mod.canStart!(state, ada, ctx)).toEqual({ ok: true, hint: 'Your turn! Add up to 3 words' });
+    expect(mod.canStart!(state, ada, ctx)).toEqual({ ok: true, hint: 'Your turn! Add up to 3 words', urgent: true });
     expect(mod.canStart!(state, bea, ctx)).toEqual({ ok: false, reason: 'Ada is writing — wait for your turn' });
   });
 

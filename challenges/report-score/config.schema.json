@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": ["prompt", "maxPoints"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "title": "What players fill in",
+      "description": "E.g. \"How many points did you score at darts?\" The number they fill in is added to their total as points.",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "maxPoints": { "type": "integer", "title": "Maximum points", "minimum": 1, "maximum": 10000, "default": 10 },
+    "penalty": {
+      "type": "integer",
+      "title": "Points deducted for a number above the maximum",
+      "description": "Taken off a player's total when they fill in more than the maximum, and the challenge closes for them (you can open it again for them in the Run tab). Players are not told about this beforehand.",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 5
+    }
+  }
+}

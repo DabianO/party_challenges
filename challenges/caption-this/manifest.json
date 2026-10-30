@@ -1,7 +1,7 @@
 {
   "id": "caption-this",
   "name": "Caption This",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "apiVersion": "2",
   "category": "social",
   "description": "Write the best caption for a picture. Another player judges whether it lands.",

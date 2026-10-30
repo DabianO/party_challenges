@@ -15,8 +15,9 @@
  *            nowhere to go it is compressed, but never below `minCells`.
  */
 
-export const COLS = 112;
-export const ROWS = 70;
+/** About 2.4 : 1, the shape of a quarter of a 16 : 9 big screen (the 2 × 2 dashboard). */
+export const COLS = 136;
+export const ROWS = 56;
 export const TOTAL = COLS * ROWS;
 /** Every blob keeps at least this share of the room: always clearly visible. */
 export const MIN_SHARE = 0.015;

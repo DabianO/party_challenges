@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BlobFieldNode, InstanceContext, PlayerRef, TapPadNode, UINode } from '@challenge/contract';
 import { walkUI } from '@challenge/contract';
 import mod, { MIN_CELLS, SEED_CELLS, clearRadiusOf, colorFor, decode, decodeSources, encode, encodeSources, maxCellsOf, upgrade } from '../server/index.ts';
-import { COLS, TOTAL, areasOf, emptyField, emptyOwners, fieldOf, fillCircle, grow, seededRng, spawn, type Field } from '../server/territory.ts';
+import { COLS, ROWS, TOTAL, areasOf, emptyField, emptyOwners, fieldOf, fillCircle, grow, seededRng, spawn, type Field } from '../server/territory.ts';
 
 function fakeCtx(players: PlayerRef[], seed = 1) {
   const clock = { now: 1_700_000_000_000 };
@@ -150,7 +150,7 @@ describe('blob-war territory', () => {
   });
 
   it('takes ground from idle neighbours when the room is full, down to their minimum', () => {
-    const field = boxes([0, 0, 0, 55, 69], [1, 56, 0, 111, 69]);
+    const field = boxes([0, 0, 0, COLS / 2 - 1, ROWS - 1], [1, COLS / 2, 0, COLS - 1, ROWS - 1]);
     const opts = { maxCells: 10_000, rng: seededRng(4), strength: (s: number) => (s === 0 ? 10 : 0), minCells: 300 };
     expect(grow(field, 0, 1000, opts)).toBe(1000);
     expect(areasOf(field.owners).get(1)).toBeLessThanOrEqual(TOTAL / 2 - 1000); // (smoothing trims the jagged front too)
@@ -170,7 +170,7 @@ describe('blob-war territory', () => {
 
   it('keeps every blob in one visible piece when a newcomer cuts through it', () => {
     // A long blob across the room; the newcomer lands in the middle of the open space below it.
-    const field = boxes([0, 0, 30, 111, 34], [1, 0, 0, 111, 3]);
+    const field = boxes([0, 0, 30, COLS - 1, 34], [1, 0, 0, COLS - 1, 3]);
     spawn(field, 2, seededRng(2), 25, MIN_CELLS);
     for (const slot of [0, 1]) {
       const cells = areasOf(field.owners).get(slot) ?? 0;
@@ -186,7 +186,7 @@ describe('blob-war territory', () => {
 
   it('never cuts a blob in two in a fight', () => {
     // Bea is a thin bar across Ada's way: Ada may dent it but not cut through.
-    const field = boxes([0, 10, 20, 40, 50], [1, 41, 0, 44, 69], [2, 45, 0, 111, 69]);
+    const field = boxes([0, 10, 20, 40, 50], [1, 41, 0, 44, ROWS - 1], [2, 45, 0, COLS - 1, ROWS - 1]);
     const opts = { maxCells: 100_000, rng: seededRng(6), strength: (s: number) => (s === 0 ? 50 : 0), minCells: MIN_CELLS };
     for (let k = 0; k < 20; k++) grow(field, 0, 100, opts);
     expect(piecesOf(field.owners, 1)).toBe(1);
@@ -196,7 +196,7 @@ describe('blob-war territory', () => {
 
 describe('blob-war', () => {
   it('has a consistent manifest: live actions, scored when closed', () => {
-    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.3.0', apiVersion: '2', results: 'onClose' });
+    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.4.0', apiVersion: '2', results: 'onClose' });
     expect(mod.manifest.capabilities).toContain('real-time-burst');
     expect(typeof mod.onPlayerJoin).toBe('function');
   });
@@ -223,6 +223,11 @@ describe('blob-war', () => {
       ['b', 1, colorFor(1)],
       ['c', 2, colorFor(2)],
     ]);
+    // The platform's player colour wins: the same colour as in the graphs.
+    const coloured = players.map((x, i) => ({ ...x, color: ['#112233', '#445566', '#778899'][i] }));
+    const { ctx: withColors } = fakeCtx(coloured);
+    expect((mod.displayPanel!(state, withColors) as BlobFieldNode).blobs.map((b) => b.color)).toEqual(['#112233', '#445566', '#778899']);
+    expect(find(mod.guestView(state, coloured[1]!, withColors).ui, 'tap-pad').color).toBe('#445566');
   });
 
   it('grows into empty space with every pump, up to the maximum share', () => {
@@ -322,6 +327,37 @@ describe('blob-war', () => {
     expect(again.cells).toBe(state.cells);
     expect(again.activity).toEqual({});
     expect(decodeSources(again.sources)[123]).toBe(123); // grows from its shape as it is
+  });
+
+  it('moves a game from the 1.3 grid (112 × 70) onto the wider grid: shapes kept round, everyone visible', () => {
+    // Two round blobs and a small one on the old grid.
+    const OLD_COLS = 112;
+    const old = new Array<string>(OLD_COLS * 70).fill('.');
+    const disc = (slot: number, cx: number, cy: number, r: number) => {
+      for (let y = 0; y < 70; y++) for (let x = 0; x < OLD_COLS; x++) if (Math.hypot(x - cx, y - cy) <= r) old[y * OLD_COLS + x] = String.fromCharCode(0x30 + slot);
+    };
+    disc(0, 30, 35, 20);
+    disc(1, 80, 35, 15);
+    disc(2, 56, 8, 4); // below the minimum once scaled down
+    const players = [p('a', 'Ada'), p('b', 'Bea'), p('c', 'Cyd')];
+    const v13 = { config, colors: { a: 0, b: 1, c: 2 }, nextColor: 3, taps: {}, cells: old.join(''), sources: '', dented: [], activity: {}, growth: {}, closed: false };
+    const state = upgrade(v13 as never, players);
+    expect(state.cells).toHaveLength(TOTAL);
+    const owners = decode(state.cells);
+    const areas = areasOf(owners);
+    for (const slot of [0, 1, 2]) {
+      expect(areas.get(slot)!).toBeGreaterThanOrEqual(MIN_CELLS);
+      expect(piecesOf(owners, slot)).toBe(1);
+    }
+    // Scaled evenly: Ada's disc is still about as wide as it is tall.
+    const ada = shape(owners, 0);
+    expect(ada.w / ada.h).toBeGreaterThan(0.85);
+    expect(ada.w / ada.h).toBeLessThan(1.15);
+    // Open room at the sides to grow into, and the same result every time (views agree).
+    expect(owners[28 * COLS]).toBe(-1);
+    expect(owners[28 * COLS + COLS - 1]).toBe(-1);
+    expect(upgrade(v13 as never, players)).toEqual(state);
+    expect(upgrade(state, players)).toBe(state);
   });
 
   it('shows a phone pump, freezes when closed and scores territory', () => {

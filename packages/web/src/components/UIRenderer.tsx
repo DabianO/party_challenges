@@ -18,6 +18,7 @@ import type {
   StackNode,
   TapPadNode,
   StopwatchNode,
+  LiveAnswerNode,
   TextInputNode,
   TextNode,
   TimerInfo,
@@ -34,6 +35,8 @@ import { BlobField } from './blobs/BlobField';
 import { Countdown } from './Countdown';
 import { TapPad } from './TapPad';
 import { Stopwatch } from './Stopwatch';
+import { LiveAnswer } from './LiveAnswer';
+import { Distribution } from './Distribution';
 
 /** Uploads a guest evidence file (FR-57) and resolves to its `media://` reference. */
 export type EvidenceUploader = (file: File) => Promise<{ ref: string; url?: string }>;
@@ -219,6 +222,11 @@ function TapPadNodeView({ node }: { node: TapPadNode }) {
   return <TapPad node={node} onAction={form.action} />;
 }
 
+function LiveAnswerNodeView({ node }: { node: LiveAnswerNode }) {
+  const form = useContext(FormContext);
+  return <LiveAnswer node={node} onAction={form.interactive ? form.action : undefined} />;
+}
+
 function StopwatchNodeView({ node }: { node: StopwatchNode }) {
   const form = useContext(FormContext);
   return <Stopwatch node={node} enabled={form.interactive && !form.disabled} submitting={form.submitting} onStart={form.action} onStop={(payload) => form.submit(payload)} />;
@@ -278,6 +286,10 @@ function Node({ node }: { node: UINode }) {
       return <TapPadNodeView node={node} />;
     case 'stopwatch':
       return <StopwatchNodeView node={node} />;
+    case 'live-answer':
+      return <LiveAnswerNodeView node={node} />;
+    case 'distribution':
+      return <Distribution node={node} />;
     case 'blob-field':
       // Keyed by mode: the closing picture starts fresh instead of animating out of the live field.
       return <BlobField key={node.mode} node={node} />;

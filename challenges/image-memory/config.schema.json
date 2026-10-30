@@ -40,9 +40,9 @@
     "answerSeconds": {
       "type": "integer",
       "title": "Answer time (seconds)",
-      "minimum": 5,
       "maximum": 300,
-      "default": 20
+      "default": 20,
+      "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }]
     },
     "points": {
       "type": "integer",

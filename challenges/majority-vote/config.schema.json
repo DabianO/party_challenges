@@ -11,7 +11,7 @@
       "maxItems": 8,
       "items": { "type": "string", "minLength": 1, "maxLength": 120 }
     },
-    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 20 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "maximum": 600, "default": 20, "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }] },
     "points": { "type": "integer", "title": "Points for the winning side", "minimum": 1, "maximum": 1000, "default": 5 },
     "mode": {
       "type": "string",

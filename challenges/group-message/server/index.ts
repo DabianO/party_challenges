@@ -146,7 +146,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   canStart(state, player) {
     const c = state.config;
     if ((state.counts[player.id] ?? 0) >= c.maxTurnsPerPlayer) return { ok: false, reason: `You added your ${plural(c.maxTurnsPerPlayer, 'contribution')} — thank you!` };
-    if (state.turn?.playerId === player.id) return { ok: true, hint: `Your turn! Add up to ${plural(c.wordsPerTurn, 'word')}` };
+    if (state.turn?.playerId === player.id) return { ok: true, hint: `Your turn! Add up to ${plural(c.wordsPerTurn, 'word')}`, urgent: true };
     if (state.turn) return { ok: false, reason: `${state.turn.displayName} is writing — wait for your turn` };
     return { ok: false, reason: 'Waiting for the next turn' };
   },

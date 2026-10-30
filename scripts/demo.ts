@@ -93,7 +93,7 @@ async function main(): Promise<void> {
 
   // Every challenge opens when the game starts.
   await add('multiple-choice', { question: 'Which planet has the most moons?', options: ['Jupiter', 'Saturn', 'Uranus', 'Neptune'], correctIndex: 1, timeLimit: 20, points: 10 }, { title: 'Space trivia' });
-  await add('numeric-answer', { question: 'How many keys does a standard piano have?', correctAnswer: 88, timeLimit: 20 }, { title: 'Piano keys' });
+  await add('multi-answer', { question: 'How many keys does a standard piano have?', answers: [{ answer: '88', tolerance: 2, unit: 'keys' }], timeLimit: 20 }, { title: 'Piano keys' });
   await add(
     'multi-answer',
     {
@@ -118,6 +118,13 @@ async function main(): Promise<void> {
   await add('blob-war', { points: 10, tapsToMax: 150, maxShare: 0.2 }, { title: 'Blob war' });
   await add('group-message', { prompt: 'Write a birthday message for Dabian', wordsPerTurn: 3, visibleWords: 35, turnSeconds: 300, maxTurnsPerPlayer: 10, pointsPerTurn: 1 }, { title: 'Birthday message' });
   await add('secret-word', { maxPoints: 10, pointsPerWord: 2 }, { title: 'Secret words' });
+  await add('report-score', { prompt: 'How many points did you score at darts?', maxPoints: 20, penalty: 5 }, { title: 'Darts' });
+  const hot = { category: 'Hot Takes' };
+  await add('sliding-scales', { statements: [{ text: 'Maximum acceptable shower time', min: 0, max: 60, step: 1, unit: 'minutes' }, { text: 'Ideal number of pets', min: 0, max: 5 }] }, { title: 'Sliding scales', ...hot });
+  await add('rivalries', { statements: [{ left: 'Star Wars', right: 'Star Trek', middle: 'Star Wars and Star Trek are basically the same' }] }, { title: 'Rivalries', ...hot });
+  await add('binaries', { statements: [{ text: 'Taylor Swift is overrated' }] }, { title: 'Binaries', ...hot });
+  await add('likelihoods', { statements: [{ text: 'Likelihood that the world will end because of climate change' }] }, { title: 'Likelihoods', ...hot });
+  await add('agree-to-disagree', { statements: [{ text: 'Pineapple belongs on pizza' }] }, { title: 'Agree to disagree', ...hot });
   await add('prediction', { question: 'Who will give the best sales pitch?', optionsSource: 'players', timeLimit: 30, points: 10 }, { title: 'Pitch predictions' });
   await add('open-performance', { prompt: 'Give your best 30-second sales pitch for a paperclip', instructions: 'Type a catchy title, then perform it live for the host.', timeLimit: 120, points: 10 }, { title: 'Paperclip pitch', evaluationMode: 'host' });
 

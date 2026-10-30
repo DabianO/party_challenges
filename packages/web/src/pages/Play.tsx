@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { GameSnapshot } from '@challenge/contract';
 import { Banner, ConnectionBanner, PausedBanner } from '../components/Banner';
+import { PlayerAvatar } from '../components/PlayerAvatar';
+import { AvatarEditor } from './play/AvatarEditor';
 import { useToast } from '../components/Toast';
 import type { EvidenceUploader } from '../components/UIRenderer';
 import { api } from '../lib/api';
@@ -29,6 +31,9 @@ export interface PlayCtx {
   meId: string;
   sock: GameSocket;
   uploadEvidence: EvidenceUploader;
+  /** Upload a selfie as the player's picture / go back to their icon. */
+  uploadAvatar(image: Blob): Promise<void>;
+  removeAvatar(): Promise<void>;
   openChallenge(instanceId: string): void;
   closeChallenge(): void;
   openJudging(): void;
@@ -103,8 +108,23 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
     [code, session.sessionToken],
   );
 
+  const uploadAvatar = useCallback(
+    async (image: Blob) => {
+      await api.uploadAvatar(code, session.sessionToken, image);
+    },
+    [code, session.sessionToken],
+  );
+  const removeAvatar = useCallback(async () => {
+    await api.removeAvatar(code, session.sessionToken);
+  }, [code, session.sessionToken]);
+  const [editingAvatar, setEditingAvatar] = useState(false);
+
   const challengeId = params.get('challenge');
   const judging = params.get('judge') === '1';
+  // A challenge (or the judging screen) opens at its top, not where the board was scrolled to.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [challengeId, judging]);
 
   const openChallenge = useCallback(
     (instanceId: string) => {
@@ -141,8 +161,8 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   }, [setParams]);
 
   const ctx = useMemo<PlayCtx | null>(
-    () => (snapshot ? { snapshot, meId, sock, uploadEvidence, openChallenge, closeChallenge, openJudging, closeJudging } : null),
-    [snapshot, meId, sock, uploadEvidence, openChallenge, closeChallenge, openJudging, closeJudging],
+    () => (snapshot ? { snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, closeChallenge, openJudging, closeJudging } : null),
+    [snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, closeChallenge, openJudging, closeJudging],
   );
 
   if (fatal?.kind === 'removed') {
@@ -161,6 +181,7 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   const logo = resolveMedia(snapshot?.game.branding.logo);
   const mine = snapshot?.leaderboard.find((e) => e.playerId === meId);
   const judgeCount = snapshot?.judging.length ?? 0;
+  const me = snapshot?.players.find((p) => p.id === meId);
 
   return (
     <div className="play">
@@ -170,9 +191,16 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
           <span className="play-title">{snapshot?.game.name ?? session.gameName}</span>
         </div>
         <div className="play-me">
-          <span>
-            You: <strong>{displayName}</strong>
-          </span>
+          {me ? (
+            <button type="button" className="play-me-button" aria-expanded={editingAvatar} onClick={() => setEditingAvatar((v) => !v)} title="Your picture">
+              <PlayerAvatar player={me} size={26} />
+              <strong>{displayName}</strong>
+            </button>
+          ) : (
+            <span>
+              You: <strong>{displayName}</strong>
+            </span>
+          )}
           {mine && snapshot && snapshot.game.status !== 'LOBBY' && snapshot.game.resultsRevealed && (
             <span className="play-rank" aria-label={`Rank ${mine.rank} of ${snapshot.leaderboard.length}, ${formatPoints(mine.total)} points`}>
               #{mine.rank}
@@ -181,6 +209,14 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
           )}
         </div>
       </header>
+      {ctx && editingAvatar && (
+        <div className="card avatar-panel">
+          <AvatarEditor ctx={ctx} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditingAvatar(false)}>
+            Done
+          </button>
+        </div>
+      )}
       <ConnectionBanner status={sock.status} />
       {snapshot && <PausedBanner paused={snapshot.game.paused} />}
       {ctx && judgeCount > 0 && !judging && ctx.snapshot.game.status === 'IN_PROGRESS' && (

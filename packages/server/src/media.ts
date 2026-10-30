@@ -52,7 +52,7 @@ export class MediaService {
     mimeType: string;
     originalName?: string;
     gameId: string | null;
-    owner: 'game' | 'challenge_instance' | 'submission';
+    owner: 'game' | 'challenge_instance' | 'submission' | 'player';
   }): Promise<MediaRecord> {
     const mime = input.mimeType.toLowerCase().split(';')[0]!.trim();
     const spec = ALLOWED[mime];

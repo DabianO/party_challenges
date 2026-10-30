@@ -1,0 +1,15 @@
+{
+  "id": "likelihoods",
+  "name": "Likelihoods",
+  "version": "1.1.0",
+  "apiVersion": "2",
+  "category": "social",
+  "suggestedCategory": "Hot Takes",
+  "description": "Hot takes in percentages: e.g. the likelihood that the world will end because of climate change, 0% to 100%. Answer as many statements as you like and change your mind any time; the big screen shows how the room answered.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "required": ["statements"],
+  "properties": {
+    "statements": {
+      "type": "array",
+      "title": "Statements",
+      "description": "Each gets its own slider from the minimum to the maximum, in steps of the interval. The unit is shown after the number (e.g. minutes).",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "title": "Statement", "minLength": 1, "maxLength": 200 },
+          "min": { "type": "number", "title": "Minimum", "default": 0 },
+          "max": { "type": "number", "title": "Maximum", "default": 10 },
+          "step": { "type": "number", "title": "Interval", "exclusiveMinimum": 0, "default": 1 },
+          "unit": { "type": "string", "title": "Unit", "maxLength": 20 }
+        }
+      }
+    },
+    "pointsPerAnswer": {
+      "type": "integer",
+      "title": "Points per answered statement",
+      "description": "Awarded when the challenge closes. 0 = just for fun.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
+    }
+  }
+}

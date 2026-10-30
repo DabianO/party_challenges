@@ -70,6 +70,8 @@ TypeScript runs directly via `tsx` (no build step for backend packages). Imports
   saves debounced (2 s). Big-screen panels come from the module's `displayPanel` (main audience only).
 - **Titles and categories:** `inst.title` (host-entered, '' = module name); snapshots expose `title`.
   `inst.category` (host-entered, '' = none) groups players' boards; not the manifest `category`.
+- **Spotlight:** module `spotlight` items (Hot Takes statements) take turns on the big screen,
+  one a minute (`spotlight.ts` picks, runtime `updateSpotlight` runs the timer, `doc.spotlight`).
 - **Hidden results:** games start with `resultsRevealed = false`; non-host snapshots then
   carry no points, ranks or results (masked in `snapshotFor`/`boardEntry`). Host action
   `reveal-results` / `hide-results`. The big screen instead shows `doc.standings`, a frozen

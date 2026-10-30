@@ -75,7 +75,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     // A replay starts with an empty answer.
     const { [player.id]: _previous, ...answers } = state.answers;
     return { ...state, answers };
@@ -140,7 +140,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const tol = Math.max(0, c.tolerance ?? 0);
     return ui.stack(
       [
-        ui.text(`You get ${c.timeLimit} seconds to answer with a number${c.unit ? ` (in ${c.unit})` : ''}. You can change your answer until time runs out or you press Finish.`),
+        ui.text(`${c.timeLimit > 0 ? `You get ${c.timeLimit} seconds to answer` : 'Answer'} with a number${c.unit ? ` (in ${c.unit})` : ''}.${c.timeLimit > 0 ? ' You can change your answer until time runs out or you press Finish.' : ''}`),
         ui.caption(tol > 0 ? `Within ± ${fmt(tol, c.unit)} of the right value scores ${c.points} points.` : `The exact value scores ${c.points} points.`),
       ],
       { gap: 'sm' },

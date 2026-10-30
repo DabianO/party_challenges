@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { Fragment, useState, type FormEvent } from 'react';
 import type { ChallengeInstanceSummary, InstanceOptions, ModuleInfo } from '@challenge/contract';
 import { AvailabilityBadge, EvaluationBadge, PhaseBadge } from '../../components/PhaseBadge';
 import { SchemaForm, configSummary } from '../../components/SchemaForm';
@@ -9,6 +9,23 @@ import { InstanceOptionsFields, DEFAULT_OPTIONS, TitleField, categoriesOf, optio
 import { Library } from './Library';
 import { moduleFor, subtitleOf, type HostCtx } from './hostApi';
 
+/** How the setup list is sorted: as players' boards show it, or for finding things. */
+type SortBy = 'board' | 'category' | 'name';
+
+const SORTS: { value: SortBy; label: string }[] = [
+  { value: 'board', label: 'Board order' },
+  { value: 'category', label: 'Category' },
+  { value: 'name', label: 'Name' },
+];
+
+function sortChallenges(list: ChallengeInstanceSummary[], by: SortBy): ChallengeInstanceSummary[] {
+  if (by === 'board') return list;
+  const byName = (a: ChallengeInstanceSummary, b: ChallengeInstanceSummary) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+  if (by === 'name') return [...list].sort(byName);
+  // By category (uncategorised last), then by board order.
+  return [...list].sort((a, b) => (a.category === '' ? 1 : 0) - (b.category === '' ? 1 : 0) || a.category.localeCompare(b.category, undefined, { sensitivity: 'base' }) || a.sortOrder - b.sortOrder);
+}
+
 type Panel = { kind: 'none' } | { kind: 'library' } | { kind: 'add'; module: ModuleInfo } | { kind: 'edit'; instance: ChallengeInstanceSummary; module: ModuleInfo | undefined };
 
 export function SetupTab({ ctx }: { ctx: HostCtx }) {
@@ -18,7 +35,9 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [options, setOptions] = useState<InstanceOptions>(DEFAULT_OPTIONS);
+  const [sortBy, setSortBy] = useState<SortBy>('board');
   const categories = categoriesOf(challenges);
+  const shown = sortChallenges(challenges, sortBy);
 
   const run = async (fn: () => Promise<unknown>, success?: string) => {
     setBusy(true);
@@ -38,7 +57,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   };
 
   const openAdd = (m: ModuleInfo) => {
-    setOptions(DEFAULT_OPTIONS);
+    setOptions({ ...DEFAULT_OPTIONS, category: m.manifest.suggestedCategory ?? '' });
     setFormError(null);
     setPanel({ kind: 'add', module: m });
   };
@@ -54,8 +73,16 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   };
 
   const remove = (c: ChallengeInstanceSummary) => {
-    if (!window.confirm(`Remove "${c.title}" from this game?`)) return;
+    const played = c.stats.started;
+    const warning = played > 0 ? `\n\n${played} ${played === 1 ? 'player has' : 'players have'} played it; the points they earned with it are taken back.` : '';
+    if (!window.confirm(`Remove "${c.title}" from this game?${warning}`)) return;
     void run(() => api.removeChallenge(ctx.gameId, ctx.token, c.id), 'Challenge removed');
+  };
+
+  const applyOrder = () => {
+    if (!window.confirm(`Use this order (by ${sortBy}) on the players' boards?`)) return;
+    void run(() => api.reorderChallenges(ctx.gameId, ctx.token, shown.map((c) => c.id)), 'Board order updated');
+    setSortBy('board');
   };
 
   const move = (index: number, dir: -1 | 1) => {
@@ -69,68 +96,118 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
 
   return (
     <div className="setup stack gap-lg">
+      <details className="card settings-details">
+        <summary>
+          <span className="section-title">⚙ Game settings</span>
+          <span className="muted small">Name, late joining, evaluation, branding</span>
+        </summary>
+        <GameSettingsForm key={`${game.name}|${JSON.stringify(game.settings)}|${JSON.stringify(game.branding)}`} ctx={ctx} />
+      </details>
+
       <section className="stack gap-sm">
         <div className="row align-center justify-between wrap gap-sm">
           <h2 className="section-title">
             Challenges <span className="muted">({challenges.length})</span>
           </h2>
-          {panel.kind === 'none' && (
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setPanel({ kind: 'library' })} disabled={modules.length === 0}>
-              + Add challenge
-            </button>
-          )}
+          <div className="row align-center gap-sm wrap">
+            {challenges.length > 1 && (
+              <label className="row align-center gap-xs small setup-sort">
+                <span className="muted">Sort</span>
+                <select className="input input-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
+                  {SORTS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {panel.kind === 'none' && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setPanel({ kind: 'library' })} disabled={modules.length === 0}>
+                + Add challenge
+              </button>
+            )}
+          </div>
         </div>
         {challenges.length === 0 && <p className="muted">No challenges yet. Add at least one before starting the game.</p>}
-        <ol className="plain-list stack gap-sm">
-          {challenges.map((c, i) => {
+        {sortBy !== 'board' && (
+          <p className="muted small row align-center gap-sm wrap">
+            Sorted by {sortBy}; players' boards keep the board order.
+            <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={applyOrder}>
+              Use this order on the board
+            </button>
+          </p>
+        )}
+        <ol className="plain-list setup-list">
+          {shown.map((c, i) => {
             const mod = moduleFor(modules, c.moduleId);
             const summary = c.summary ?? configSummary(mod?.configurationSchema, c.configuration);
-            const pending = c.phase === 'PENDING';
+            const subtitle = subtitleOf(c, summary);
+            const boardIndex = challenges.indexOf(c);
+            const heading = sortBy === 'category' && (i === 0 || shown[i - 1]!.category !== c.category);
             return (
-              <li key={c.id} className="card card-flat challenge-row">
-                <span className="challenge-index mono" aria-hidden="true">
-                  {i + 1}
-                </span>
-                <div className="grow stack gap-xs">
-                  <span className="row gap-sm align-center wrap">
-                    {c.category && <span className="badge tone-muted">{c.category}</span>}
-                    <strong>{c.title}</strong>
-                    <PhaseBadge phase={c.phase} availability={c.availability} started={game.startedAt !== null} />
+              <Fragment key={c.id}>
+                {heading && <li className="setup-group eyebrow">{c.category || 'No category'}</li>}
+                <li className="challenge-row">
+                  <span className="challenge-index mono" aria-hidden="true">
+                    {boardIndex + 1}
                   </span>
-                  {subtitleOf(c, summary) && <span className="muted small clamp">{subtitleOf(c, summary)}</span>}
-                  <span className="row gap-xs wrap">
-                    <AvailabilityBadge availability={c.availability} assignedCount={c.assignedPlayerIds?.length} />
-                    <EvaluationBadge mode={c.evaluationMode} />
-                    {c.allowReplay && <span className="badge tone-primary">↻ Replays</span>}
-                  </span>
-                  {c.error && (
-                    <span className="field-error" role="alert">
-                      {c.error}
+                  <div className="challenge-row-main">
+                    <span className="challenge-row-title">
+                      {c.category && sortBy !== 'category' && <span className="badge tone-muted">{c.category}</span>}
+                      <strong title={c.title}>{c.title}</strong>
                     </span>
-                  )}
-                </div>
-                <div className="row gap-xs">
-                  <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => openEdit(c)}>
-                    Edit
-                  </button>
-                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.title} up`} disabled={i === 0 || busy} onClick={() => move(i, -1)}>
-                    ↑
-                  </button>
-                  <button type="button" className="btn btn-icon" aria-label={`Move ${c.title} down`} disabled={i === challenges.length - 1 || busy} onClick={() => move(i, 1)}>
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-danger btn-ghost"
-                    aria-label={`Remove ${c.title}`}
-                    disabled={!pending || busy}
-                    title={!pending ? 'Only locked (not yet opened) challenges can be removed' : undefined}
-                    onClick={() => remove(c)}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </li>
+                    <span className="challenge-row-meta muted small">
+                      <PhaseBadge phase={c.phase} availability={c.availability} started={game.startedAt !== null} />
+                      {c.availability !== 'open' && <AvailabilityBadge availability={c.availability} assignedCount={c.assignedPlayerIds?.length} />}
+                      {c.evaluationMode !== 'automatic' && <EvaluationBadge mode={c.evaluationMode} />}
+                      {c.allowReplay && <span className="badge tone-primary">↻</span>}
+                      <span className="challenge-row-sub" title={subtitle || undefined}>
+                        {subtitle || c.moduleName}
+                      </span>
+                    </span>
+                    {c.error && (
+                      <span className="field-error" role="alert">
+                        {c.error}
+                      </span>
+                    )}
+                  </div>
+                  <div className="challenge-row-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => openEdit(c)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-icon btn-sm"
+                      aria-label={`Move ${c.title} up`}
+                      title={sortBy !== 'board' ? 'Sort by board order to move challenges' : undefined}
+                      disabled={sortBy !== 'board' || boardIndex === 0 || busy}
+                      onClick={() => move(boardIndex, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-icon btn-sm"
+                      aria-label={`Move ${c.title} down`}
+                      title={sortBy !== 'board' ? 'Sort by board order to move challenges' : undefined}
+                      disabled={sortBy !== 'board' || boardIndex === challenges.length - 1 || busy}
+                      onClick={() => move(boardIndex, 1)}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-icon btn-sm btn-danger btn-ghost"
+                      aria-label={`Remove ${c.title}`}
+                      disabled={busy || game.status === 'FINISHED'}
+                      onClick={() => remove(c)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              </Fragment>
             );
           })}
         </ol>
@@ -178,10 +255,6 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
           }}
         />
       )}
-
-      <section className="card stack gap-md">
-        <GameSettingsForm key={`${game.name}|${JSON.stringify(game.settings)}|${JSON.stringify(game.branding)}`} ctx={ctx} />
-      </section>
 
       <BackupCard ctx={ctx} />
     </div>

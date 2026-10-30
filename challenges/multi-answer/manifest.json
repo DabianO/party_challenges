@@ -1,13 +1,13 @@
 {
   "id": "multi-answer",
-  "name": "Multiple Answers",
-  "version": "1.0.0",
+  "name": "Answer",
+  "version": "1.1.0",
   "apiVersion": "2",
   "category": "knowledge",
-  "description": "A question with several answers to fill in. Every correct answer scores a share of the points; only a full set scores them all.",
+  "description": "A question with one answer, or several. Text is forgiving about spelling and case; numbers can have a tolerance. With several answers each correct one scores a share of the points.",
   "players": { "min": 1, "max": null },
-  "duration": { "typicalSeconds": 60 },
-  "capabilities": ["timer", "text-input", "statistics"],
+  "duration": { "typicalSeconds": 45 },
+  "capabilities": ["timer", "text-input", "numeric-input", "image", "statistics"],
   "evaluation": { "mode": "automatic" },
   "results": "immediate",
   "resubmission": "none"

@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "required": ["statements"],
+  "properties": {
+    "statements": {
+      "type": "array",
+      "title": "Rivalries",
+      "description": "Two opposite or competing things, one on each end of a slider (e.g. Star Wars and Star Trek). Players pick a side, how strongly, or the exact middle.",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["left", "right"],
+        "properties": {
+          "left": { "type": "string", "title": "One side", "minLength": 1, "maxLength": 80 },
+          "right": { "type": "string", "title": "Other side", "minLength": 1, "maxLength": 80 },
+          "middle": {
+            "type": "string",
+            "title": "What the middle means",
+            "description": "Optional, e.g. \"Star Wars and Star Trek are basically the same\".",
+            "maxLength": 150
+          }
+        }
+      }
+    },
+    "pointsPerAnswer": {
+      "type": "integer",
+      "title": "Points per answered rivalry",
+      "description": "Awarded when the challenge closes. 0 = just for fun.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
+    }
+  }
+}

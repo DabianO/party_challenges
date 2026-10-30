@@ -1,0 +1,15 @@
+{
+  "id": "binaries",
+  "name": "Binaries",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "suggestedCategory": "Hot Takes",
+  "description": "Hot takes with a simple yes or no: e.g. Taylor Swift is overrated. Answer as many statements as you like and change your mind any time; the big screen shows how the room answered.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

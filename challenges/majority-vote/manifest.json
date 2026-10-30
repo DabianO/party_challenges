@@ -1,7 +1,7 @@
 {
   "id": "majority-vote",
   "name": "Majority Vote",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "apiVersion": "2",
   "category": "social",
   "description": "Anonymous vote with no correct answer: players who side with the majority (or the minority) score when the host closes the vote.",

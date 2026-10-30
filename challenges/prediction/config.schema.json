@@ -28,9 +28,9 @@
     "timeLimit": {
       "type": "integer",
       "title": "Time limit (seconds)",
-      "minimum": 5,
       "maximum": 600,
-      "default": 20
+      "default": 20,
+      "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }]
     },
     "points": {
       "type": "integer",

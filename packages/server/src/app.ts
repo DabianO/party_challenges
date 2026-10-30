@@ -172,6 +172,9 @@ function isLocalRequest(req: FastifyRequest, local: Set<string>): boolean {
   return local.has(normalizeIp(last));
 }
 
+/** Selfies are cropped and shrunk on the phone; anything bigger is not one. */
+const AVATAR_MAX_BYTES = 1024 * 1024;
+
 function pickOptions(body: Record<string, unknown>): Partial<InstanceOptions> {
   const out: Partial<InstanceOptions> = {};
   if ('title' in body) out.title = body.title as string;
@@ -393,6 +396,31 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
     const { game } = playerGame(req);
     if (game.status !== 'IN_PROGRESS') throw new EngineError('The game is not running', 'invalid_state');
     return reply.status(201).send(await storeUpload(req, game.id, 'submission'));
+  });
+
+  /**
+   * A player's selfie as their icon (the phone crops it to a square and shrinks it first).
+   * Images only, at most AVATAR_MAX_BYTES. DELETE goes back to their icon.
+   */
+  app.post('/api/avatar', async (req, reply) => {
+    const { game, playerId } = playerGame(req);
+    const file = await req.file();
+    if (!file) throw new MediaError('No picture uploaded');
+    const data = await file.toBuffer();
+    if (!file.mimetype.toLowerCase().startsWith('image/')) throw new MediaError('Upload a picture', 415);
+    if (data.length > AVATAR_MAX_BYTES) throw new MediaError('That picture is too large', 413);
+    const record = await media.store({ data, mimeType: file.mimetype, originalName: file.filename, gameId: game.id, owner: 'player' });
+    const ref = MediaService.ref(record.id);
+    const result = game.setAvatar(playerId, ref);
+    if (!result.ok) throw new EngineError(result.reason, 'invalid_state');
+    return reply.status(201).send({ ref, url: MediaService.resolveUrl(ref, config.mediaBaseUrl) });
+  });
+
+  app.delete('/api/avatar', async (req) => {
+    const { game, playerId } = playerGame(req);
+    const result = game.setAvatar(playerId, null);
+    if (!result.ok) throw new EngineError(result.reason, 'invalid_state');
+    return result;
   });
 
   app.get('/media/:id', async (req, reply) => {

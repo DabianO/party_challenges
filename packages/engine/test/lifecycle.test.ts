@@ -5,6 +5,7 @@ import closestNumber from '../../../challenges/closest-number/server/index.ts';
 import captionThis from '../../../challenges/caption-this/server/index.ts';
 import groupMessage from '../../../challenges/group-message/server/index.ts';
 import blobWar from '../../../challenges/blob-war/server/index.ts';
+import reportScore from '../../../challenges/report-score/server/index.ts';
 
 import { createFakeTime } from './helpers.ts';
 
@@ -14,6 +15,7 @@ function setup(random: () => number = () => 0) {
   registry.register(captionThis as never, null);
   registry.register(groupMessage as never, null);
   registry.register(blobWar as never, null);
+  registry.register(reportScore as never, null);
   const time = createFakeTime();
   const events: GameEvent[] = [];
   const kicked: string[] = [];
@@ -48,7 +50,7 @@ describe('board lifecycle', () => {
     expect(() => game.addChallenge('closest-number', { question: 'x' })).toThrow(/Invalid configuration/);
     const inst = game.addChallenge('closest-number', CLOSEST);
     expect(inst.availability).toBe('open');
-    expect(inst.moduleVersion).toBe('2.0.0');
+    expect(inst.moduleVersion).toBe('2.1.0');
 
     game.performHostAction({ action: 'open-lobby' });
     const alice = game.join('Alice').player;
@@ -550,6 +552,125 @@ describe('board lifecycle', () => {
     // Closed challenges have to be reset first too.
     game.performHostAction({ action: 'close-challenge', instanceId: inst.id });
     expect(() => game.updateChallenge(inst.id, CLOSEST)).toThrow(/reset it first/);
+  });
+
+  it('lets a module close a challenge for one player and the host reopen it for them', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Darts' });
+    const inst = game.addChallenge('report-score', { prompt: 'Darts score?', maxPoints: 20, penalty: 5 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'host' });
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+    const tile = () => lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === inst.id)!;
+    const host = () => lastSnapshot(events, 'host');
+    const total = () => host().leaderboard.find((l) => l.playerId === ada.id)!.total;
+
+    expect(() => game.performHostAction({ action: 'reopen-for-player', instanceId: inst.id, playerId: ada.id })).toThrow(/can already play/);
+    game.startAttempt(ada.id, inst.id);
+    expect(game.submit(ada.id, inst.id, { value: 25 }, true)).toEqual({ ok: true });
+    expect(total()).toBe(-5);
+    // Closed for Ada (done, not waiting), with the warning as her note.
+    expect(tile()).toMatchObject({ status: 'submitted', noteTone: 'danger' });
+    expect(tile().note).toMatch(/5 points have been deducted from your total, and this challenge is now closed for you/);
+    expect(game.startAttempt(ada.id, inst.id)).toEqual({ ok: false, reason: 'Closed for you' });
+    expect(host().challenges[0]!.closedFor).toEqual([ada.id]);
+    // Players never see who it is closed for.
+    expect(lastSnapshot(events, `player:${ada.id}`).challenges[0]!.closedFor).toBeUndefined();
+
+    game.performHostAction({ action: 'reopen-for-player', instanceId: inst.id, playerId: ada.id });
+    expect(host().challenges[0]!.closedFor).toEqual([]);
+    expect(tile()).toMatchObject({ status: 'available' });
+    game.startAttempt(ada.id, inst.id);
+    game.submit(ada.id, inst.id, { value: 14 }, true);
+    expect(total()).toBe(9);
+    expect(tile()).toMatchObject({ status: 'submitted', noteTone: 'success', note: 'Your score: 14 (−5 for going over the maximum)' });
+    expect(game.startAttempt(ada.id, inst.id)).toEqual({ ok: false, reason: 'Your score: 14' });
+  });
+
+  it('puts the tile on top while it is the player\'s turn', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Story' });
+    const inst = game.addChallenge('group-message', { prompt: 'Once upon a time', wordsPerTurn: 3, turnSeconds: 120, maxTurnsPerPlayer: 2 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    const bea = game.join('Bea').player;
+    game.connect({ role: 'player', playerId: ada.id });
+    game.connect({ role: 'player', playerId: bea.id });
+    game.performHostAction({ action: 'start-game' });
+    const tileOf = (id: string) => lastSnapshot(events, `player:${id}`).board.find((b) => b.instanceId === inst.id)!;
+    const turn = [ada, bea].find((p) => tileOf(p.id).status === 'available')!;
+    const other = turn === ada ? bea : ada;
+    expect(tileOf(turn.id).urgent).toBe(true);
+    expect(tileOf(other.id).urgent).toBe(false);
+    // Still urgent while they write.
+    game.startAttempt(turn.id, inst.id);
+    expect(tileOf(turn.id)).toMatchObject({ status: 'in_progress', urgent: true });
+  });
+
+  it('runs challenges without a time limit when the host sets it to 0', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Untimed' });
+    expect(() => game.addChallenge('closest-number', { ...CLOSEST, timeLimit: 3 })).toThrow();
+    const inst = game.addChallenge('closest-number', { ...CLOSEST, timeLimit: 0 });
+    expect(inst.configuration.timeLimit).toBe(0);
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+
+    expect(game.startAttempt(ada.id, inst.id)).toEqual({ ok: true });
+    expect(inst.timers).toEqual([]);
+    expect(lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === inst.id)).toMatchObject({ status: 'in_progress' });
+    // Still open much later; the answer locks when the player locks it in.
+    game.submit(ada.id, inst.id, { answer: 140 }, true);
+    expect(game.attemptOf(inst.id, ada.id)?.status).not.toBe('in_progress');
+  });
+
+  it('removes a challenge during the game, taking back its points and pending judgements', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Removal' });
+    const closest = game.addChallenge('closest-number', CLOSEST);
+    const caption = game.addChallenge('caption-this', CAPTION, { evaluationMode: 'host' });
+    const untouched = game.addChallenge('closest-number', CLOSEST, { title: 'Never played' });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    const bea = game.join('Bea').player;
+    game.connect({ role: 'host' });
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+
+    // Open but unplayed: simply gone.
+    game.removeChallenge(untouched.id);
+    expect(game.doc.instances.map((i) => i.id)).toEqual([closest.id, caption.id]);
+
+    for (const [p, answer] of [[ada, 137], [bea, 100]] as const) {
+      game.startAttempt(p.id, closest.id);
+      game.submit(p.id, closest.id, { answer });
+    }
+    game.performHostAction({ action: 'close-challenge', instanceId: closest.id });
+    game.performHostAction({ action: 'adjust-score', playerId: ada.id, points: 3, reason: 'Bonus' });
+    game.startAttempt(ada.id, caption.id);
+    game.submit(ada.id, caption.id, { caption: 'Monday.' });
+    game.finishAttempt(ada.id, caption.id);
+    const before = lastSnapshot(events, 'host');
+    expect(before.leaderboard.find((l) => l.playerId === ada.id)!.total).toBeGreaterThan(3);
+    expect(before.hostQueue).toHaveLength(1);
+
+    game.removeChallenge(closest.id);
+    game.removeChallenge(caption.id);
+    const host = lastSnapshot(events, 'host');
+    expect(host.challenges).toEqual([]);
+    expect(host.hostQueue).toEqual([]);
+    expect(host.leaderboard.find((l) => l.playerId === ada.id)!.total).toBe(3); // only the manual bonus stays
+    expect(host.leaderboard.find((l) => l.playerId === bea.id)!.total).toBe(0);
+    expect(game.doc.attempts).toEqual([]);
+    expect(lastSnapshot(events, `player:${ada.id}`).board).toEqual([]);
+
+    game.performHostAction({ action: 'end-game' });
+    game.performHostAction({ action: 'close-game' });
+    expect(() => game.removeChallenge(caption.id)).toThrow(/read-only/);
   });
 
   it('exports a setup and imports it as a new game, reporting what could not be restored', () => {

@@ -52,7 +52,7 @@ const predict = (playerId: string, answer: unknown, submittedAt = T0 + 1000): Su
 describe('prediction', () => {
   it('has a consistent v2 manifest with host resolution hooks', () => {
     expect(mod.manifest.id).toBe('prediction');
-    expect(mod.manifest.version).toBe('2.0.0');
+    expect(mod.manifest.version).toBe('2.1.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.results).toBe('onClose');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });

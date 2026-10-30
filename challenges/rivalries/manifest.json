@@ -1,0 +1,15 @@
+{
+  "id": "rivalries",
+  "name": "Rivalries",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "suggestedCategory": "Hot Takes",
+  "description": "Pick a side: e.g. Star Wars or Star Trek, on a slider from one to the other with the exact middle for the undecided. Answer as many rivalries as you like and change your mind any time; the big screen shows which side the room is on.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

@@ -171,6 +171,16 @@ export const api = {
     return request<MediaUploadResponse>('/api/evidence', { formData, headers: { 'X-Game-Code': code, 'X-Session-Token': sessionToken } });
   },
 
+  /** A player's selfie (already cropped on the phone) becomes their picture. */
+  uploadAvatar: (code: string, sessionToken: string, image: Blob) => {
+    const formData = new FormData();
+    formData.append('file', image, 'selfie.jpg');
+    return request<{ ref: string; url: string }>('/api/avatar', { formData, headers: { 'X-Game-Code': code, 'X-Session-Token': sessionToken } });
+  },
+
+  removeAvatar: (code: string, sessionToken: string) =>
+    request<{ ok: boolean }>('/api/avatar', { method: 'DELETE', headers: { 'X-Game-Code': code, 'X-Session-Token': sessionToken } }),
+
   gameByCode: (code: string) => request<PublicGameInfo>(`/api/games/by-code/${encodeURIComponent(code)}`),
 
   join: (code: string, displayName: string) => request<JoinResponse>('/api/join', { body: { code, displayName } }),

@@ -84,7 +84,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     // A replay starts with no pick.
     const { [player.id]: _previous, ...picks } = state.picks;
     return { ...state, picks };
@@ -165,7 +165,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const c = state.config;
     return ui.stack(
       [
-        ui.text(`You get ${c.timeLimit} seconds to pick one of ${c.options.length} options. Tapping an option submits it — you cannot change your mind.`),
+        ui.text(`${c.timeLimit > 0 ? `You get ${c.timeLimit} seconds to pick` : 'Pick'} one of ${c.options.length} options. Tapping an option submits it — you cannot change your mind.`),
         ui.caption(c.speedBonus ? `A correct answer scores ${c.points} points, plus up to 50% extra for speed.` : `A correct answer scores ${c.points} points.`),
       ],
       { gap: 'sm' },

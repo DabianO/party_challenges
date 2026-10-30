@@ -35,12 +35,14 @@ Errors are JSON `{ "error": string, "code"?: string }` with status 400 (validati
 | `GET /api/games/:id/export` | host | Full game document (secrets stripped) |
 | `POST /api/games/:id/challenges` | host | Add instance `{ moduleId, configuration, title?, category?, allowReplay?, availability?, assignedPlayerIds?, evaluationMode? }` |
 | `PATCH /api/games/:id/challenges/:instanceId` | host | Update `configuration` (only while nobody has played it: never opened, or reset; an open instance restarts from the new configuration) and/or instance options |
-| `DELETE /api/games/:id/challenges/:instanceId` | host | Remove (no attempts yet) |
+| `DELETE /api/games/:id/challenges/:instanceId` | host | Remove, any time before the game is closed; points already earned with it are reversed, as with a reset |
 | `POST /api/games/:id/challenges/reorder` | host | `{ order: string[] }` |
 | `GET /api/games/:id/challenges/:instanceId/results` | host | Shared results of an instance |
 | `POST /api/games/:id/actions` | host | Body is a `HostAction` (below) |
 | `POST /api/games/:id/media` | host | multipart `file` → `{ id, ref: "media://<id>", url }` (configuration media) |
 | `POST /api/evidence` | guest headers | multipart `file` → `{ ref, url }` (submission evidence, §14.6); game must be running |
+| `POST /api/avatar` | guest headers | multipart `file` (an image, at most 1 MB; the web client sends a 320 px square JPEG) → `{ ref, url }`; becomes the player's picture (`PlayerPublic.avatar`) |
+| `DELETE /api/avatar` | guest headers | Back to the player's icon (`PlayerPublic.icon`) |
 | `GET /media/:id` | – | Serves validated media with sandbox CSP + nosniff |
 | `GET /api/games/by-code/:code` | – | Public game info / joinability |
 | `POST /api/join` | – | `{ code, displayName }` → `JoinResponse` |
@@ -65,12 +67,16 @@ that header.
 | `close-challenge` `{instanceId}` | ACTIVE → LOCKED: running attempts lock, `onClose` modules are evaluated, immediate modules reach RESULTS once nothing is pending |
 | `reopen-challenge` `{instanceId}` | LOCKED/EVALUATING/RESULTS(immediate) → ACTIVE |
 | `reset-challenge` `{instanceId}` | Reverse all points for the instance, wipe attempts/submissions/assignments, re-open |
+| `reopen-for-player` `{instanceId, playerId}` | Give one player another go at a challenge the module closed for them (listed in the host-only `closedFor` of the challenge summary); points already earned or deducted stay |
 | `assign-challenge` `{instanceId, playerIds}` | Make the instance available to specific players only |
 | `decide` `{assignmentId, decision, points?, note?}` | Host queue decision (FR-67) |
 | `override` `{submissionId, decision, points?, reason}` | Overrule any evaluation, before or after results (FR-55); previous points are reversed in the ledger |
 | `resolve` `{instanceId, payload}` | Instance-level host resolution for `onClose` modules (e.g. prediction outcome) |
 | `retry-evaluation` `{instanceId}` | Re-run evaluation after a module error |
 | `pause` / `resume` | Freeze/resume all attempt timers and judge deadlines; submissions rejected while paused |
+| `clear-avatar` | `{ playerId }`: take a player's selfie off (they get their icon back) |
+| `show-spotlight` | `{ instanceId, itemId, hold? }`: put one spotlight item (e.g. a Hot Take) on the big screen now, for a minute or, with `hold`, until `release-spotlight` |
+| `release-spotlight` | Let the spotlight rotate again after a held item (the next one comes up at once) |
 | `publish-standings` | Copy the current leaderboard (with graph lines) to the big screen and append ranking changes (new leader, overtakes, newcomers, drawing level) to the standings feed. The big screen changes only on this action; phones are not affected |
 | `reveal-results` / `hide-results` | Show (or hide again) points, ranks and results to players and the main display. Games start hidden; the host always sees everything. `reveal-results` also works on a FINISHED game |
 | `end-game` | Close every open challenge, hand unanswered peer tasks to the host, → GAME_RESULTS |

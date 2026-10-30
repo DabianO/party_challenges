@@ -57,7 +57,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onAttemptStart(state, player, ctx) {
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     // A replay starts without a photo.
     const { [player.id]: _previous, ...photos } = state.photos;
     return { ...state, photos };
@@ -118,7 +118,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     return ui.stack(
       [
         ui.text(c.task),
-        ui.caption(`You have ${c.timeLimit} seconds from the moment you start to take and upload one photo. Another player checks it; an approved photo earns ${c.points} points.`),
+        ui.caption(`${c.timeLimit > 0 ? `You have ${c.timeLimit} seconds from the moment you start to take` : 'Take'} and upload one photo. Another player checks it; an approved photo earns ${c.points} points.`),
       ],
       { gap: 'sm' },
     );

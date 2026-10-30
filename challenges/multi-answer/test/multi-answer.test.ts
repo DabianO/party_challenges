@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InstanceContext, PlayerRef, Submission } from '@challenge/contract';
-import mod, { matches, normalise, scoreFor } from '../server/index.ts';
+import mod, { answerText, matches, normalise, numericBox, scoreFor } from '../server/index.ts';
 
 const players: PlayerRef[] = [
   { id: 'p1', displayName: 'Ada', connected: true },
@@ -35,7 +35,7 @@ const capitals = {
   points: 10,
 };
 
-const sub = (playerId: string, answers: string[]): Submission<Record<string, string>> => ({
+const sub = (playerId: string, answers: (string | number)[]): Submission<Record<string, string | number>> => ({
   id: `s-${playerId}`,
   playerId,
   payload: Object.fromEntries(answers.map((a, i) => [`a${i}`, a])),
@@ -46,7 +46,7 @@ const sub = (playerId: string, answers: string[]): Submission<Record<string, str
 
 describe('multi-answer', () => {
   it('has a consistent manifest', () => {
-    expect(mod.manifest).toMatchObject({ id: 'multi-answer', version: '1.0.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'multi-answer', version: '1.1.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -79,7 +79,7 @@ describe('multi-answer', () => {
     expect(view.status).toBe('3 per correct answer · 10 for all 3');
     expect(mod.validateInput(state, players[0]!, { a0: 'Paris' }, ctx)).toEqual({ ok: true });
     expect(mod.validateInput(state, players[0]!, { a0: ' ', a1: '' }, ctx)).toEqual({ ok: false, reason: 'Fill in at least one answer' });
-    expect(mod.validateInput(state, players[0]!, { a0: 5 } as never, ctx)).toMatchObject({ ok: false });
+    expect(mod.validateInput(state, players[0]!, { a0: true } as never, ctx)).toMatchObject({ ok: false });
   });
 
   it('scores each answer box, full marks only for the full set', () => {
@@ -111,5 +111,47 @@ describe('multi-answer', () => {
     // Naming the same colour twice only counts once.
     expect(mod.evaluate(state, [sub('p2', ['red', 'red', 'green'])], ctx)).toMatchObject({ correct: [true, false, false], points: 3 });
     expect(JSON.stringify(mod.guestView(state, players[0]!, ctx).ui)).toContain('"label":"Answer 2"');
+  });
+
+  it('asks a single question with one text answer', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance({ question: 'Who painted the Night Watch?', answers: [{ answer: 'Rembrandt', alternatives: 'Rembrandt van Rijn' }], anyOrder: false, timeLimit: 30, points: 5 }, ctx);
+    const view = mod.guestView(state, players[0]!, ctx);
+    expect(JSON.stringify(view.ui)).toContain('"label":"Your answer"');
+    expect(JSON.stringify(view.ui)).toContain('Lock in my answer"');
+    expect(view.status).toBe('5 points');
+    expect(mod.validateInput(state, players[0]!, { a0: '' }, ctx)).toEqual({ ok: false, reason: 'Fill in your answer' });
+
+    const right = mod.evaluate(state, [sub('p1', ['rembrandt van rijn'])], ctx);
+    expect(mod.calculateScores(state, right, ctx)).toEqual([{ playerId: 'p1', points: 5, reason: 'Correct' }]);
+    const wrong = mod.evaluate(state, [sub('p2', ['Vermeer'])], ctx);
+    expect(mod.calculateScores(state, wrong, ctx)).toEqual([{ playerId: 'p2', points: 0, reason: 'Wrong' }]);
+    const results = mod.resultsView(state, [right, wrong], ctx);
+    expect(JSON.stringify(results.ui)).toContain('1 of 2 right');
+    const mine = JSON.stringify(results.guestUi!(players[1]!));
+    expect(mine).toContain('Not quite');
+    expect(mine).toContain('You answered Vermeer');
+  });
+
+  it('takes numbers in a number box, within the tolerance (the old Numeric Answer)', () => {
+    const { ctx } = fakeCtx();
+    const piano = { question: 'How many keys does a piano have?', answers: [{ answer: '88', tolerance: 2, unit: 'keys' }], anyOrder: false, timeLimit: 20, points: 10, media: 'media://piano' };
+    const state = mod.createInstance(piano, ctx);
+    expect(numericBox(state.config, 0)).toBe(true);
+    const ui = JSON.stringify(mod.guestView(state, players[0]!, ctx).ui);
+    expect(ui).toContain('"type":"number-input"');
+    expect(ui).toContain('"unit":"keys"');
+    expect(ui).toContain('media://piano');
+    expect(mod.validateInput(state, players[0]!, { a0: 86 }, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, players[0]!, { a0: Number.NaN }, ctx)).toMatchObject({ ok: false });
+
+    expect(mod.evaluate(state, [sub('p1', [86])], ctx)).toMatchObject({ allCorrect: true, points: 10 });
+    expect(mod.evaluate(state, [sub('p1', [90.5])], ctx)).toMatchObject({ allCorrect: false, points: 0 });
+    expect(mod.evaluate(state, [sub('p1', ['89,5'])], ctx)).toMatchObject({ allCorrect: true });
+    expect(answerText(piano.answers[0]!)).toBe('88 keys (± 2 keys)');
+    // Text answers ignore the tolerance; mixed sets get a number box only where the answer is a number.
+    expect(matches({ answer: 'Paris', tolerance: 3 }, 'Pari')).toBe(false);
+    expect(numericBox({ ...capitals, answers: [{ answer: 'Paris' }, { answer: '1889' }] }, 1)).toBe(true);
+    expect(numericBox({ ...capitals, anyOrder: true, answers: [{ answer: 'Paris' }, { answer: '1889' }] }, 1)).toBe(false);
   });
 });

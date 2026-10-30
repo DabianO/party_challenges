@@ -1605,14 +1605,30 @@ legend {
 .display.cursor-hidden * {
   cursor: none;
 }
+/* Logo left, the game's name centred, how to join right. */
 .display-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding: 16px 32px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.display-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.display-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 0;
+}
+.display-header > .display-join {
+  justify-self: end;
 }
 .display-game-name {
   font-weight: 800;
@@ -2000,11 +2016,107 @@ details[open] > summary::before {
   padding: 8px 12px 12px;
   border-top: 1px solid var(--border);
 }
-.challenge-row {
+/* Setup list: one compact line per challenge; the buttons never move off the right edge. */
+.setup-list {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+.challenge-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.challenge-row .challenge-index {
+  width: 24px;
+  height: 24px;
+  font-size: 0.8rem;
+}
+.challenge-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.challenge-row-title,
+.challenge-row-meta {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.challenge-row-title strong,
+.challenge-row-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.challenge-row-meta .badge,
+.challenge-row-title .badge {
+  flex: none;
+}
+.challenge-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.challenge-row-actions .btn {
+  min-height: 34px;
+  height: 34px;
+}
+.challenge-row-actions .btn-icon {
+  width: 34px;
+  min-width: 34px;
+}
+.setup-group {
+  margin: 10px 0 2px;
+}
+.setup-sort .input-sm {
+  width: auto;
+}
+
+/* Game settings fold away at the top of Setup. */
+.settings-details {
+  padding: 12px 16px;
+}
+.settings-details > summary {
+  display: flex;
+  align-items: baseline;
   gap: 12px;
-  flex-wrap: wrap;
+  cursor: pointer;
+  list-style: none;
+}
+.settings-details > summary .section-title {
+  flex: none;
+}
+.settings-details > summary .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-details > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-details > summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.settings-details:not([open]) > summary::after {
+  transform: rotate(-90deg);
+}
+.settings-details[open] > summary {
+  margin-bottom: 16px;
 }
 .challenge-index {
   width: 28px;
@@ -2103,10 +2215,6 @@ details[open] > summary::before {
 @media (max-width: 480px) {
   .page {
     padding: 16px 12px 40px;
-  }
-  .challenge-row .row {
-    width: 100%;
-    justify-content: flex-end;
   }
   .ui-bar {
     grid-template-columns: minmax(0, 1fr);
@@ -2208,6 +2316,38 @@ details[open] > summary::before {
 .tile.status-in_progress {
   border-color: var(--warning-text);
   background: color-mix(in srgb, var(--warning) 18%, var(--surface));
+}
+/* The player is needed right now (their turn): full width, its own colour, a soft pulse. */
+.board-urgent .tiles {
+  grid-template-columns: minmax(0, 1fr);
+}
+.tile.is-urgent,
+.tile.is-urgent.is-playable,
+.tile.is-urgent.status-in_progress {
+  min-height: 0;
+  border-color: var(--success-text);
+  background: color-mix(in srgb, var(--success) 26%, var(--surface));
+  animation: urgent-pulse 1.6s ease-in-out infinite;
+}
+.tile.is-urgent .tile-state,
+.tile.is-urgent.is-playable .tile-state,
+.tile.is-urgent.status-in_progress .tile-state {
+  color: var(--success-text);
+  font-size: 1rem;
+}
+@keyframes urgent-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success-text) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--success-text) 0%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile.is-urgent {
+    animation: none;
+  }
 }
 .tile.is-inert,
 .tile:disabled {
@@ -2352,11 +2492,12 @@ details[open] > summary::before {
 .viz-key {
   display: inline-block;
   width: 14px;
-  height: 2px;
-  border-radius: 1px;
+  height: 4px;
+  border-radius: 2px;
 }
-.viz-key-other {
-  background: var(--viz-other);
+.viz-legend-rank {
+  font-family: var(--mono);
+  font-weight: 700;
 }
 .viz-grid {
   stroke: var(--viz-grid);
@@ -2384,30 +2525,11 @@ details[open] > summary::before {
 .viz-line.is-me {
   stroke-width: 3;
 }
-.viz-line-other {
-  stroke: var(--viz-other);
-  stroke-width: 1.5;
-  opacity: 0.55;
+.viz-end-face {
+  fill: var(--surface-2);
 }
-.viz-end {
-  stroke: var(--surface);
-  stroke-width: 2;
-}
-.viz-connector {
-  stroke: var(--viz-axis);
-  stroke-width: 1;
-}
-.viz-label {
-  font-size: 12px;
-  font-family: var(--font);
-}
-.viz-label-name {
-  fill: var(--text);
-  font-weight: 700;
-}
-.viz-label-value {
-  fill: var(--text-muted);
-  font-family: var(--mono);
+.viz-end-icon {
+  pointer-events: none;
 }
 .viz-crosshair {
   stroke: var(--viz-axis);
@@ -2447,20 +2569,13 @@ details[open] > summary::before {
   display: flex;
   flex-direction: column;
 }
-.viz-label-rank {
-  fill: var(--text-muted);
-  font-family: var(--mono);
-  font-weight: 700;
-}
-/* Each update replays the race: lines draw in, then end markers and labels appear. */
-.is-animated .viz-line:not(.viz-line-other) {
+/* Each update replays the race: lines draw in, then the end markers appear. */
+.is-animated .viz-line {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
   animation: viz-draw 1.6s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
 }
-.is-animated .viz-end,
-.is-animated .viz-label,
-.is-animated .viz-connector {
+.is-animated .viz-end {
   opacity: 0;
   animation: viz-fade 0.5s ease-out 1.4s forwards;
 }
@@ -2487,11 +2602,15 @@ details[open] > summary::before {
 .progress-chart-lg .viz-line {
   stroke-width: 3;
 }
-.progress-chart-lg .viz-end {
-  r: 6px;
+/* The legend is the only place names appear: legible from the back of the room. */
+.progress-chart-lg .viz-legend {
+  font-size: clamp(0.95rem, 1.3vw, 1.3rem);
+  gap: 6px 18px;
 }
-.progress-chart-lg .viz-label {
-  font-size: 20px;
+.progress-chart-lg .viz-key {
+  width: 22px;
+  height: 6px;
+  border-radius: 3px;
 }
 .progress-chart-lg .viz-tick {
   font-size: 15px;
@@ -2523,6 +2642,24 @@ details[open] > summary::before {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-2);
+}
+.spotlight-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.spotlight-pick select {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  cursor: pointer;
 }
 .reveal-panel.is-revealed {
   border-style: solid;
@@ -2820,19 +2957,177 @@ body.has-bg-image .challenge-top {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 24px;
-  /* Header and paddings take the rest: the chart fills the screen without scrolling. */
-  height: calc(100dvh - 150px);
+  /* Fills what the header leaves (see .display.is-dashboard): never scrolls. */
+}
+/* During the game the big screen is exactly one screen: the dashboard takes the rest. */
+.display.is-dashboard {
+  height: 100dvh;
+  overflow: hidden;
+}
+.display.is-dashboard .display-header {
+  padding-block: 10px;
+}
+.display.is-dashboard .display-body {
+  min-height: 0;
+  max-width: none;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+/* The player key on the left, the tiles in the rest. */
+.dashboard {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  /* A fixed-height row, so the key's height can be measured against it (and never grows it). */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+}
+.dashboard > .race {
+  min-height: 0;
+}
+
+/*
+ * One colour key for the whole screen, as wide as the longest name (never shortened). Rows
+ * share the height (at most 34px each) and the text size follows the row (set from the
+ * measured height), so 5 or 50 players fit; above 24 players it uses two columns.
+ */
+.player-key {
+  align-self: start;
+  height: min(100%, calc(var(--key-rows, 1) * var(--key-row-max, 34px) + 24px));
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+.player-key-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: max-content;
+  grid-template-rows: repeat(var(--key-rows, 1), minmax(0, 1fr));
+  line-height: 1.1;
+}
+.player-key-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+  white-space: nowrap;
+}
+.player-key-list li.is-off {
+  opacity: 0.5;
+}
+/* A repeat challenge refused the last answer (e.g. above the maximum) and asks again. */
+.next-warning {
+  text-align: center;
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+}
+.next-warning h2 {
+  font-size: 1.15rem;
+  line-height: 1.35;
+}
+.tile-note.tone-danger,
+.tile-note.tone-warning {
+  color: var(--danger-text);
+}
+
+/* A number field's special value (e.g. "No time limit") as a checkbox beside it. */
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.schema-form .input-special {
+  max-width: 8rem;
+  text-align: center;
+}
+
+/* A player's picture or icon, ringed in their colour (key, graphs, phone, host). */
+.avatar {
+  --avatar-size: 32px;
+  --avatar-color: var(--accent);
+  flex: none;
+  box-sizing: border-box;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  border-radius: 50%;
+  border: max(2px, calc(var(--avatar-size) * 0.09)) solid var(--avatar-color);
+  background: var(--surface-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.avatar-icon {
+  font-size: calc(var(--avatar-size) * 0.56);
+  line-height: 1;
+}
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.avatar-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 16px 0;
+}
+.avatar-panel .avatar-editor {
+  align-self: stretch;
+}
+.play-me-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px 2px 2px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.player-key-rank {
+  flex: none;
+  min-width: 1.4em;
+  text-align: right;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.player-key-name {
+  font-weight: 600;
+}
+/* Tile titles stay small: the space is for the content. */
+.race {
+  gap: 16px;
+}
+.race .display-h2 {
+  font-size: clamp(0.95rem, 1.25vw, 1.25rem);
+  letter-spacing: 0.02em;
 }
 .race-main {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   min-height: 0;
   background: color-mix(in srgb, var(--surface) 80%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px 24px;
+  padding: 12px 16px;
 }
 .race-head {
   display: flex;
@@ -2859,34 +3154,63 @@ body.has-bg-image .challenge-top {
 .race-empty-icon {
   font-size: clamp(3rem, 7vw, 6rem);
 }
-/* With a live panel (Blob War) the screen splits in half: the chart left, the panels right. */
-.race-side {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-  min-height: 0;
+/*
+ * Every tile shares one screen, never scrolling: the race alone fills it; with one panel the
+ * screen splits in half; with two the race keeps the left half and the panels share the right;
+ * with three it is 2 × 2 (and more rows of two beyond that).
+ */
+.race {
+  grid-auto-rows: minmax(0, 1fr);
 }
-.race.has-panels {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+.race.tiles-2,
+.race.tiles-3,
+.race.tiles-4,
+.race.tiles-5 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.race.tiles-3 > .race-main {
+  grid-row: span 2;
+}
+.race-main,
+.race-panel {
+  overflow: hidden;
 }
 .race-panel {
-  flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   background: color-mix(in srgb, var(--surface) 80%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px 18px;
+  padding: 12px 16px;
 }
-/* A narrow window (not a beamer): stack the chart and the panels. */
-@media (max-width: 900px) {
-  .race,
-  .race.has-panels {
-    grid-template-columns: minmax(0, 1fr);
+/* A phone-sized window (not a beamer): stack the chart and the panels. */
+@media (max-width: 700px) {
+  .display.is-dashboard {
     height: auto;
+    overflow: visible;
+  }
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .player-key {
+    height: auto;
+    font-size: 0.9rem !important;
+  }
+  .player-key-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .race[class*='tiles-'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
+    height: auto;
+  }
+  .race.tiles-3 > .race-main {
+    grid-row: auto;
   }
   .race-main {
     min-height: 60vh;
@@ -3029,6 +3353,231 @@ body.has-bg-image .challenge-top {
 .tap-pad-count {
   font-family: var(--mono);
   font-size: 0.9rem;
+}
+
+/* Live answer: sent on every change (Hot Takes) -------------------------- */
+.live-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.live-answer-value {
+  font-weight: 700;
+  text-align: center;
+  color: var(--accent-text);
+}
+.live-answer.is-unanswered .live-answer-value {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.live-answer.is-unanswered .range {
+  opacity: 0.55;
+}
+.live-answer-marks {
+  position: relative;
+  height: 1.4em;
+  margin: 0 10px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.live-answer-marks span {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.live-answer-marks span:first-child {
+  transform: translateX(-10px);
+}
+.live-answer-marks span:last-child {
+  transform: translateX(calc(-100% + 10px));
+}
+.live-answer-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* Distribution: how a group answered on a scale -------------------------- */
+.ui-distribution {
+  --dist-height: 160px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+/* Room above the plot for the marker label. */
+.ui-distribution.has-marker {
+  padding-top: 1.6em;
+}
+.ui-dist-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: var(--dist-height);
+  border-bottom: 2px solid var(--border);
+}
+.ui-dist-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+.ui-dist-bar {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 6px 6px 0 0;
+  background: var(--accent);
+  transition: height 0.5s ease;
+}
+.ui-dist-col.tone-success .ui-dist-bar {
+  background: var(--success);
+}
+.ui-dist-col.tone-danger .ui-dist-bar {
+  background: var(--danger);
+}
+.ui-dist-col.tone-warning .ui-dist-bar {
+  background: var(--warning);
+}
+.ui-dist-col.tone-neutral .ui-dist-bar,
+.ui-dist-col.tone-muted .ui-dist-bar {
+  background: var(--text-muted);
+}
+.ui-dist-col.is-highlight .ui-dist-bar {
+  outline: 3px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.ui-dist-share {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.ui-dist-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--text);
+  pointer-events: none;
+}
+.ui-dist-marker-label {
+  position: absolute;
+  top: -1.6em;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.ui-dist-labels {
+  display: flex;
+  gap: 4px;
+}
+.ui-dist-labels span {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+  /* At most two lines, so the plot keeps its room. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ui-dist-labels span.is-highlight {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.ui-dist-axis {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  font-weight: 700;
+}
+.ui-dist-axis span:last-child {
+  text-align: right;
+}
+.ui-dist-axis span:nth-child(2) {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Big-screen spotlight (one statement a minute) ---------------------------- */
+.race-panel-body > .ui-spotlight {
+  display: flex;
+  flex-direction: column;
+}
+/* The chart takes whatever room the statement and caption leave in the tile. */
+.ui-spotlight > .ui-stack {
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+.ui-spotlight .ui-distribution {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ui-spotlight .ui-dist-plot {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 48px;
+}
+.ui-spotlight .ui-bars {
+  margin-block: auto;
+}
+.ui-spotlight .ui-text-title {
+  font-size: clamp(1rem, 1.45vw, 1.6rem);
+  line-height: 1.2;
+}
+.ui-spotlight .ui-text-caption {
+  font-size: clamp(0.8rem, 1vw, 1rem);
+}
+.ui-spotlight .ui-dist-share,
+.ui-spotlight .ui-dist-marker-label {
+  font-size: clamp(0.85rem, 1.3vw, 1.2rem);
+}
+.ui-spotlight .ui-dist-labels span {
+  font-size: clamp(0.75rem, 1.1vw, 1rem);
+}
+.ui-spotlight .ui-dist-axis {
+  font-size: clamp(0.85rem, 1.2vw, 1.2rem);
+}
+.ui-spotlight .ui-bar-track {
+  height: clamp(30px, 6vh, 64px);
+}
+.spotlight-time {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.spotlight-time span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  animation-name: spotlight-time;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+@keyframes spotlight-time {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 /* Content this (older) page cannot show: offer a reload. */
@@ -3209,11 +3758,7 @@ body.has-bg-image .challenge-top {
   background: var(--surface-2);
 }
 
-@media (max-width: 1100px) {
-  .race {
-    grid-template-columns: minmax(0, 1fr);
-    height: auto;
-  }
+@media (max-width: 700px) {
   .race-chart {
     height: 60vh;
   }

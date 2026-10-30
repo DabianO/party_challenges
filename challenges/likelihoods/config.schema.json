@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "required": ["statements"],
+  "properties": {
+    "statements": {
+      "type": "array",
+      "title": "Statements",
+      "description": "Each is answered with a likelihood from 0% (never) to 100% (certain), e.g. \"Likelihood that the world will end because of climate change\".",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "title": "Statement", "minLength": 1, "maxLength": 200 }
+        }
+      }
+    },
+    "pointsPerAnswer": {
+      "type": "integer",
+      "title": "Points per answered statement",
+      "description": "Awarded when the challenge closes. 0 = just for fun.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
+    }
+  }
+}

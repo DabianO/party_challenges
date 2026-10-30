@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
-import type { GameSnapshot, LeaderboardEntry } from '@challenge/contract';
+import type { GameSnapshot, LeaderboardEntry, SpotlightView } from '@challenge/contract';
 import { ConnectionDot, Leaderboard, rankClass } from '../components/Leaderboard';
+import { PlayerAvatar } from '../components/PlayerAvatar';
 import { ProgressChart } from '../components/ProgressChart';
 import { QrCode } from '../components/QrCode';
 import { UIView } from '../components/UIRenderer';
@@ -50,16 +51,14 @@ export function Display() {
   const showJoin = snapshot && snapshot.game.status !== 'LOBBY' && snapshot.game.status !== 'FINISHED';
 
   return (
-    <div className={`display${idle ? ' cursor-hidden' : ''}`}>
+    <div className={`display${idle ? ' cursor-hidden' : ''}${snapshot?.game.status === 'IN_PROGRESS' && !fatal ? ' is-dashboard' : ''}`}>
       <header className="display-header">
-        <div className="row gap-md align-center grow">
-          {logo && <img className="brand-logo brand-logo-lg" src={logo} alt="" />}
-          <div className="stack">
-            <span className="display-game-name">{snapshot?.game.name ?? 'Challenge Platform'}</span>
-            {hostName && <span className="display-host muted">Hosted by {hostName}</span>}
-          </div>
+        <div className="display-brand">{logo && <img className="brand-logo brand-logo-lg" src={logo} alt="" />}</div>
+        <div className="display-title">
+          <span className="display-game-name">{snapshot?.game.name ?? 'Challenge Platform'}</span>
+          {hostName && <span className="display-host muted">Hosted by {hostName}</span>}
         </div>
-        {showJoin && (
+        {showJoin ? (
           <div className="display-join" aria-label="How to join">
             <QrCode value={snapshot.joinUrl} size={72} label={`QR code to join ${snapshot.game.name}`} />
             <div className="stack">
@@ -70,6 +69,8 @@ export function Display() {
               <span className="display-join-url">{shortUrl(snapshot.joinUrl)}</span>
             </div>
           </div>
+        ) : (
+          <span aria-hidden="true" />
         )}
       </header>
 
@@ -196,12 +197,16 @@ function Progress({ entries, total, limit }: { entries: LeaderboardEntry[]; tota
  * ("Update the big screen" in the Run tab).
  */
 function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOffset: number }) {
-  const { standings, players, challenges } = snapshot;
+  const { standings, players, challenges, spotlight } = snapshot;
   const now = useNow(5000) + clockOffset;
-  // Live big-screen panels from challenges (e.g. Blob War) take the right half of the screen.
+  // Everything shares one screen, never scrolling: the race, live panels from challenges
+  // (e.g. Blob War) and the spotlight (e.g. Hot Takes), in a grid of up to 2 × 2 (more rows if needed).
   const panels = challenges.filter((c) => c.displayPanel);
+  const tiles = 1 + panels.length + (spotlight ? 1 : 0);
   return (
-    <div className={`race${panels.length ? ' has-panels' : ''}`}>
+    <div className="dashboard">
+      <PlayerKey snapshot={snapshot} />
+      <div className={`race tiles-${Math.min(tiles, 5)}`}>
       <section className="race-main" aria-label="The race">
         <div className="race-head">
           <h2 className="display-h2">The race</h2>
@@ -212,12 +217,12 @@ function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOff
             <ProgressChart
               key={standings.publishedAt}
               entries={standings.entries}
-              playerOrder={players.map((p) => p.id)}
+              players={players}
               challengeCount={challenges.length}
               size="lg"
               fillHeight
               animate
-              showRank
+              legend={false}
             />
           ) : (
             <div className="race-empty">
@@ -232,19 +237,111 @@ function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOff
           )}
         </div>
       </section>
-      {panels.length > 0 && (
-        <div className="race-side">
-          {panels.map((c) => (
-            <section key={c.id} className="race-panel" aria-label={c.title}>
-              <h2 className="display-h2">{c.title}</h2>
-              <div className="race-panel-body">
-                <UIView node={c.displayPanel} />
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+      {/* Reading order: race, the first live panel, the spotlight, then any other panels. */}
+      {panels.slice(0, 1).map(panelTile)}
+      {spotlight && <Spotlight spot={spotlight} clockOffset={clockOffset} />}
+      {panels.slice(1).map(panelTile)}
+      </div>
     </div>
+  );
+}
+
+/** Tallest row in the key, and the text size as a share of the row. */
+const KEY_ROW_MAX = 34;
+const KEY_TEXT_SHARE = 0.6;
+
+/**
+ * Every player's colour, once for the whole screen (the graph, the blobs and anything else
+ * that colours players). In the order of the last published standings, with the rank, so it
+ * doubles as the leaderboard; players who joined since come last. One column: names are never
+ * shortened (the key is as wide as the longest name) and rows and text shrink to fit everyone.
+ */
+function PlayerKey({ snapshot }: { snapshot: GameSnapshot }) {
+  const { players, standings } = snapshot;
+  const ref = useRef<HTMLElement>(null);
+  const [rowHeight, setRowHeight] = useState(KEY_ROW_MAX);
+  const rows = Math.max(1, players.length);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const pad = parseFloat(getComputedStyle(el).paddingTop) + parseFloat(getComputedStyle(el).paddingBottom);
+      setRowHeight(Math.min(KEY_ROW_MAX, (el.clientHeight - pad) / rows));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [rows]);
+
+  if (players.length === 0) return null;
+  const rankOf = new Map((standings?.entries ?? []).map((e, i) => [e.playerId, { rank: e.rank, order: i }] as const));
+  const ordered = [...players].sort((a, b) => (rankOf.get(a.id)?.order ?? Infinity) - (rankOf.get(b.id)?.order ?? Infinity));
+  const fontSize = Math.max(7, Math.min(16, rowHeight * KEY_TEXT_SHARE));
+  const style = { '--key-rows': rows, '--key-row-max': `${KEY_ROW_MAX}px`, fontSize: `${fontSize}px` } as CSSProperties;
+  return (
+    <aside ref={ref} className="player-key" aria-label="Players and their colours" style={style}>
+      <ol className="player-key-list">
+        {ordered.map((p) => {
+          const rank = rankOf.get(p.id)?.rank;
+          return (
+            <li key={p.id} className={p.connected ? undefined : 'is-off'}>
+              <PlayerAvatar player={p} size={Math.max(10, Math.round(rowHeight * 0.86))} />
+              {rank !== undefined && <span className="player-key-rank">{rank}</span>}
+              <span className="player-key-name">{p.displayName}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </aside>
+  );
+}
+
+/**
+ * A bar that runs down until the spotlight moves on. Where it starts is worked out once, when
+ * the item appears: recomputing it on every snapshot would restart the animation further
+ * along each time and make the bar run out early.
+ */
+function SpotlightTime({ startedAt, endsAt, clockOffset }: { startedAt: number; endsAt: number; clockOffset: number }) {
+  const [timing] = useState(() => {
+    const duration = Math.max(1, endsAt - startedAt);
+    const elapsed = Math.min(duration, Math.max(0, Date.now() + clockOffset - startedAt));
+    return { animationDuration: `${duration}ms`, animationDelay: `-${elapsed}ms` };
+  });
+  return (
+    <span className="spotlight-time" aria-hidden="true">
+      <span style={timing} />
+    </span>
+  );
+}
+
+function panelTile(c: GameSnapshot['challenges'][number]) {
+  return (
+    <section key={c.id} className="race-panel" aria-label={c.title}>
+      <h2 className="display-h2">{c.title}</h2>
+      <div className="race-panel-body">
+        <UIView node={c.displayPanel} />
+      </div>
+    </section>
+  );
+}
+
+/** One statement (or other module spotlight item) for a minute, with a bar running down the time, or held by the host. */
+function Spotlight({ spot, clockOffset }: { spot: SpotlightView; clockOffset: number }) {
+  return (
+    <section className="race-panel race-spotlight" aria-label={spot.category || spot.title}>
+      <div className="race-head">
+        <h2 className="display-h2">{spot.category || spot.title}</h2>
+        <span className="race-updated muted">
+          {[spot.category && spot.category !== spot.title ? spot.title : '', !spot.held && spot.total > 1 ? `${spot.total} take turns` : ''].filter(Boolean).join(' · ')}
+        </span>
+      </div>
+      {!spot.held && <SpotlightTime key={spot.startedAt} startedAt={spot.startedAt} endsAt={spot.endsAt} clockOffset={clockOffset} />}
+      <div className="race-panel-body">
+        <UIView key={`${spot.instanceId}/${spot.itemId}`} node={spot.ui} className="ui-display ui-spotlight" />
+      </div>
+    </section>
   );
 }
 
@@ -323,7 +420,7 @@ function Final({ snapshot }: { snapshot: GameSnapshot }) {
       </div>
       <section className="card stack gap-sm" aria-label="Points race">
         <h2 className="display-h2">The race</h2>
-        <ProgressChart entries={leaderboard} playerOrder={snapshot.players.map((p) => p.id)} challengeCount={challenges.length} size="lg" height={420} />
+        <ProgressChart entries={leaderboard} players={snapshot.players} challengeCount={challenges.length} size="lg" height={420} />
       </section>
       {withResults.length > 0 && (
         <section className="stack gap-md">

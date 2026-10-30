@@ -5,7 +5,7 @@
     "question": { "type": "string", "title": "Question", "minLength": 1, "maxLength": 300 },
     "correctAnswer": { "type": "number", "title": "Correct answer" },
     "unit": { "type": "string", "title": "Unit", "default": "", "maxLength": 20 },
-    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 30 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "maximum": 600, "default": 30, "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }] },
     "maxPoints": { "type": "integer", "title": "Maximum points", "minimum": 1, "maximum": 1000, "default": 10 },
     "scoring": {
       "type": "string",

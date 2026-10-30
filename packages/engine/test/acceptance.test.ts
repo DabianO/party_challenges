@@ -14,11 +14,14 @@ import { createFakeTime } from './helpers.ts';
 const CHALLENGES_DIR = resolve(import.meta.dirname, '../../../challenges');
 
 const EXPECTED_MODULES = [
+  'agree-to-disagree',
+  'binaries',
   'blob-war',
   'caption-this',
   'closest-number',
   'group-message',
   'image-memory',
+  'likelihoods',
   'majority-vote',
   'multi-answer',
   'multiple-choice',
@@ -26,7 +29,10 @@ const EXPECTED_MODULES = [
   'open-performance',
   'photo-hunt',
   'prediction',
+  'report-score',
+  'rivalries',
   'secret-word',
+  'sliding-scales',
   'stop-the-clock',
   'timed-reaction',
 ];
@@ -41,6 +47,8 @@ interface Scenario {
   advanceBeforeSubmit?: number;
   /** Instance-level host resolution payload (onClose modules with hostResolutionView). */
   resolution?: Record<string, unknown>;
+  /** The module ends a player's part after one entry (`canStart` → finished): no replay. */
+  noReplay?: boolean;
 }
 
 const SCENARIOS: Record<string, Scenario> = {
@@ -98,6 +106,12 @@ const SCENARIOS: Record<string, Scenario> = {
     inputs: (i) => ({ words: ['Happy birthday', 'to you', 'dear friend'][i] }),
   },
   // Self-judged, one word per attempt: answer about the word the player's screen shows.
+  // The number is the score (decided outside the app), up to the maximum; then the player is done.
+  'report-score': {
+    configuration: { prompt: 'Darts score?', maxPoints: 20, penalty: 5 },
+    inputs: (i) => ({ value: i === 0 ? 17 : 4 + i }),
+    noReplay: true,
+  },
   'secret-word': {
     configuration: { maxPoints: 10, pointsPerWord: 2 },
     inputs: (i, entry) => ({ ...submitPayloads(entry.view)[0], succeeded: i !== 1 }),
@@ -107,6 +121,32 @@ const SCENARIOS: Record<string, Scenario> = {
     configuration: { targetSeconds: 2, hideAfterSeconds: 1, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 },
     inputs: (i) => ({ clock: 2000 + 40 * i }),
     advanceBeforeSubmit: 2000,
+  },
+  // Hot Takes: answers are live actions on statements, changeable until the challenge closes.
+  'sliding-scales': {
+    configuration: { statements: [{ text: 'Shower minutes', min: 0, max: 60, unit: 'min' }], pointsPerAnswer: 1 },
+    inputs: () => ({}),
+    action: (i) => ({ answer: { id: 's0', value: 10 * (i + 1) } }),
+  },
+  rivalries: {
+    configuration: { statements: [{ left: 'Star Wars', right: 'Star Trek', middle: 'Basically the same' }], pointsPerAnswer: 1 },
+    inputs: () => ({}),
+    action: (i) => ({ answer: { id: 's0', value: i - 1 } }),
+  },
+  binaries: {
+    configuration: { statements: [{ text: 'Taylor Swift is overrated' }], pointsPerAnswer: 1 },
+    inputs: () => ({}),
+    action: (i) => ({ answer: { id: 's0', value: i % 2 } }),
+  },
+  likelihoods: {
+    configuration: { statements: [{ text: 'The world ends because of climate change' }], pointsPerAnswer: 1 },
+    inputs: () => ({}),
+    action: (i) => ({ answer: { id: 's0', value: 30 * i } }),
+  },
+  'agree-to-disagree': {
+    configuration: { statements: [{ text: 'Pineapple belongs on pizza' }], pointsPerAnswer: 1 },
+    inputs: () => ({}),
+    action: (i) => ({ answer: { id: 's0', value: 2 * i } }),
   },
   prediction: {
     configuration: { question: 'Who wins the next round?', optionsSource: 'custom', options: ['Team A', 'Team B'], timeLimit: 20 },
@@ -213,7 +253,7 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
         time.advance(5_000);
       }
       // Replays: player 0 plays every immediate-results module a second time.
-      const replayable = manifest.results === 'immediate';
+      const replayable = manifest.results === 'immediate' && !SCENARIOS[id]!.noReplay;
       const ada = players[0]!;
       expect(lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === instId)!.canReplay, `${id}: canReplay`).toBe(replayable);
       if (replayable) {

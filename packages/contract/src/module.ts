@@ -84,10 +84,45 @@ export interface Manifest {
    * `immediate` results only.
    */
   attempts?: 'once' | 'repeat';
+  /** Pre-filled as the challenge's category when the host adds it (e.g. "Hot Takes"). */
+  suggestedCategory?: string;
+  /**
+   * Id of the module that replaces this one. The host's library no longer offers it, but
+   * games and setup files that use it keep working.
+   */
+  supersededBy?: string;
 }
 
-/** A module's say on whether a player may start an attempt right now (see `canStart`). */
-export type StartCheck = { ok: true; hint?: string } | { ok: false; reason: string };
+/**
+ * Something the main display can put in the spotlight for a minute, e.g. one statement and
+ * how the room answered it (see `ChallengeModule.spotlight`).
+ */
+export interface SpotlightItem {
+  /** Stable within the instance. */
+  id: string;
+  /** Short text for the host's list, e.g. the statement itself. */
+  label: string;
+  ui: UINode;
+  /** Grows with every new or changed answer; the display shows the busiest item next. */
+  activity: number;
+}
+
+/**
+ * A module's say on whether a player may start an attempt right now (see `canStart`).
+ * `urgent`: the player is needed right now (e.g. it is their turn): their board puts the
+ * tile on top, highlighted, for as long as it says so (also while their attempt runs).
+ * `finished`: the player has nothing left to do here (a repeat module's tile then shows as
+ * done instead of waiting for a turn).
+ */
+export type StartCheck = { ok: true; hint?: string; urgent?: boolean } | { ok: false; reason: string; finished?: boolean };
+
+/** `playerNote` with a tone: `danger`/`warning` show as a warning instead of "Locked in ✓". */
+export interface PlayerNote {
+  text: string;
+  tone?: NoteTone;
+}
+
+export type NoteTone = 'success' | 'warning' | 'danger';
 
 /**
  * Challenge instance lifecycle (engine-owned):
@@ -106,6 +141,8 @@ export interface PlayerRef {
   id: string;
   displayName: string;
   connected: boolean;
+  /** The player's colour (#rrggbb), the same everywhere in the game (`playerColor`). */
+  color?: string;
 }
 
 export type EventAudience = 'all' | 'host' | 'main' | 'players' | `player:${string}`;
@@ -243,6 +280,13 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
    * clear that player's per-attempt data here so the new attempt starts fresh.
    */
   onAttemptStart?(state: State, player: PlayerRef, ctx: InstanceContext): State;
+  /**
+   * Players this challenge is closed for while it is still open for others (e.g. after an
+   * answer that broke the rules). The host can give each of them another go (`reopenFor`).
+   * Implement both or neither.
+   */
+  closedFor?(state: State, ctx: InstanceContext): string[];
+  reopenFor?(state: State, player: PlayerRef, ctx: InstanceContext): State;
   /** Called when a player's attempt locks (submitted, finished, timed out, or instance closed). */
   onAttemptLocked?(state: State, player: PlayerRef, ctx: InstanceContext): State;
 
@@ -283,7 +327,7 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
    * the host keeps results hidden (e.g. "312 ms · best 287 ms" so players can improve).
    * It bypasses the hidden-results rule: share only what is meant to be seen right away.
    */
-  playerNote?(state: State, player: PlayerRef, ctx: InstanceContext): string | null;
+  playerNote?(state: State, player: PlayerRef, ctx: InstanceContext): string | PlayerNote | null;
   /** The player's live attempt screen. */
   guestView(state: State, player: PlayerRef, ctx: InstanceContext): GuestViewModel;
   /** How a submission is shown to judges (peer or host). Falls back to a generic evidence view. */
@@ -296,6 +340,12 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
    * `blob-field`). Everyone in the room sees it: must not leak answers (MR-9).
    */
   displayPanel?(state: State, ctx: InstanceContext): UINode;
+  /**
+   * Optional items for the big screen's spotlight, which shows one item a minute from every
+   * open instance that has any: the one with the most new answers since it was last shown,
+   * every item once before any repeats. Everyone sees it: aggregate answers only (MR-9).
+   */
+  spotlight?(state: State, ctx: InstanceContext): SpotlightItem[];
   /** Results over all evaluations so far; `guestUi` personalises them. */
   resultsView(state: State, evaluations: Evaluation[], ctx: InstanceContext): ResultsViewModel;
 }

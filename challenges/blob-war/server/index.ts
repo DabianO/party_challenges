@@ -22,7 +22,7 @@
  * and fights by activity; v1.3 keeps every blob one visible piece. Older state is upgraded on
  * first use.
  */
-import { blobCells, defineModule, ui, type Manifest, type PlayerRef } from '@challenge/contract';
+import { blobCells, defineModule, playerColor, ui, type Manifest, type PlayerRef } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 import {
@@ -37,6 +37,7 @@ import {
   fieldOf,
   grow,
   releaseAbsent,
+  tidy,
   seededRng,
   spawn,
   type Field,
@@ -99,21 +100,8 @@ export { MIN_CELLS, MIN_SHARE };
 /** Pumping counts for the fight with this half-life (ms): stop pumping and you weaken fast. */
 export const ACTIVITY_HALF_LIFE = 6000;
 
-/** Distinct, vivid colours for any number of players: hues a golden angle apart. */
-export function colorFor(slot: number): string {
-  const h = (slot * 137.508 + 12) % 360;
-  const s = 0.74;
-  const l = slot % 2 ? 0.6 : 0.52;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-    return Math.round(c * 255)
-      .toString(16)
-      .padStart(2, '0');
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
-}
+/** Fallback colour for a slot when the platform gives none: the platform's own player palette. */
+export const colorFor = playerColor;
 
 export const maxCellsOf = (config: Config) => Math.max(SEED_CELLS + 1, Math.round(Math.min(0.5, Math.max(0.05, config.maxShare)) * TOTAL));
 /** Radius of the circle a newcomer clears: the size of the largest blob allowed. */
@@ -192,8 +180,43 @@ function strengthOf(state: State, now: number): (slot: number) => number {
  * old sizes. v1.1: add growth sources (every blob grows from its current shape) and activity.
  * Pure (fixed seed), so views can call it too.
  */
+/** The grid before 1.4: 112 × 70 cells. */
+const V13 = { cols: 112, rows: 70 };
+
+/**
+ * Territory from the 1.3 grid on the wider 1.4 grid: every shape scaled down evenly (so blobs
+ * stay round) and centred, which leaves open room at the sides to grow into. Blobs then grow
+ * from their shapes as they are; any blob that came out below the minimum grows back to it.
+ */
+function widen(state: State): State {
+  const old = new Int16Array(V13.cols * V13.rows).fill(-1);
+  for (let i = 0; i < old.length; i++) old[i] = blobCells.decode(state.cells[i] ?? blobCells.EMPTY);
+  const scale = Math.min(COLS / V13.cols, ROWS / V13.rows);
+  const x0 = (COLS - V13.cols * scale) / 2;
+  const y0 = (ROWS - V13.rows * scale) / 2;
+  const owners = emptyOwners();
+  for (let y = 0; y < ROWS; y++) {
+    const oy = Math.floor((y + 0.5 - y0) / scale);
+    if (oy < 0 || oy >= V13.rows) continue;
+    for (let x = 0; x < COLS; x++) {
+      const ox = Math.floor((x + 0.5 - x0) / scale);
+      if (ox >= 0 && ox < V13.cols) owners[y * COLS + x] = old[oy * V13.cols + ox]!;
+    }
+  }
+  const field = fieldOf(owners);
+  tidy(field);
+  const rng = seededRng(4231);
+  for (const [slot, area] of areasOf(field.owners)) {
+    if (area < MIN_CELLS) grow(field, slot, MIN_CELLS - area, { maxCells: maxCellsOf(state.config), rng });
+  }
+  return withField(state, field);
+}
+
 export function upgrade(raw: State | StateV11 | LegacyState, players: PlayerRef[]): State {
-  if (typeof (raw as State).sources === 'string') return raw as State;
+  if (typeof (raw as State).sources === 'string') {
+    const state = raw as State;
+    return state.cells.length === V13.cols * V13.rows && TOTAL !== V13.cols * V13.rows ? widen(state) : state;
+  }
   if (typeof (raw as StateV11).cells === 'string') {
     const v11 = raw as StateV11;
     return withField({ ...v11, sources: '', dented: [], activity: {} }, fieldOf(decode(v11.cells)));
@@ -376,7 +399,8 @@ export default defineModule<Config, State, Action, Evaluation>({
         .filter((p) => state.colors[p.id] !== undefined)
         .map((p) => {
           const slot = state.colors[p.id]!;
-          return { id: p.id, slot, color: colorFor(slot), label: p.displayName, share: (areas.get(slot) ?? 0) / TOTAL, pulse: state.taps[p.id] ?? 0 };
+          // The player's own colour, the same as in the graphs and everywhere else.
+          return { id: p.id, slot, color: p.color ?? colorFor(slot), label: p.displayName, share: (areas.get(slot) ?? 0) / TOTAL, pulse: state.taps[p.id] ?? 0 };
         }),
     );
   },
@@ -385,7 +409,7 @@ export default defineModule<Config, State, Action, Evaluation>({
     const players = ctx.players();
     const state = upgrade(raw, players);
     const share = sharesOf(state, players).get(player.id) ?? 0;
-    const color = colorFor(state.colors[player.id] ?? state.nextColor);
+    const color = player.color ?? colorFor(state.colors[player.id] ?? state.nextColor);
     return {
       ui: ui.stack(
         [

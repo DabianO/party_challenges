@@ -1,0 +1,15 @@
+{
+  "id": "report-score",
+  "name": "Report Your Score",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "other",
+  "description": "Players fill in a number that counts as their points, decided by something outside the app (a darts round, a pub quiz). Up to a maximum: a number above it costs points and closes the challenge for that player.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 15 },
+  "capabilities": ["numeric-input", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none",
+  "attempts": "repeat"
+}

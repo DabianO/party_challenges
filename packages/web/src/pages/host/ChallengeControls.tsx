@@ -72,6 +72,26 @@ function ChallengeRow({ ctx, c, index, act, busy, running }: { ctx: HostCtx; c: 
             {c.allowReplay && <span className="badge tone-primary">↻ Replays</span>}
           </span>
           <span className="muted small mono">{statsLine(c)}</span>
+          {running && c.closedFor && c.closedFor.length > 0 && (
+            <span className="row gap-xs wrap align-center closed-for">
+              <span className="small">Closed for:</span>
+              {c.closedFor.map((pid) => {
+                const name = players.find((p) => p.id === pid)?.displayName ?? 'a player';
+                return (
+                  <button
+                    key={pid}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={busy}
+                    title={`Let ${name} play "${c.title}" again (points already deducted stay)`}
+                    onClick={() => void act({ action: 'reopen-for-player', instanceId: id, playerId: pid })}
+                  >
+                    ▶ {name}
+                  </button>
+                );
+              })}
+            </span>
+          )}
           {c.error && (
             <span className="row gap-sm wrap align-center">
               <span className="field-error" role="alert">

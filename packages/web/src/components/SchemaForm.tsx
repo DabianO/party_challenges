@@ -24,6 +24,11 @@ export interface Prop {
   maxItems?: number;
   properties?: Record<string, Prop>;
   required?: string[];
+  /**
+   * A special number besides the range, from `anyOf: [{ const: 0, title: "No time limit" },
+   * { minimum: 5 }]`: offered as a checkbox next to the number.
+   */
+  special?: { value: number; label: string };
 }
 
 function num(v: unknown): number | undefined {
@@ -42,14 +47,19 @@ export function normaliseProp(raw: unknown): Prop {
   else if (Array.isArray(r.enum)) type = 'string';
   else if (r.properties) type = 'object';
   const properties = r.properties && typeof r.properties === 'object' ? Object.fromEntries(Object.entries(r.properties as Record<string, unknown>).map(([k, v]) => [k, normaliseProp(v)])) : undefined;
+  // A number that is either one titled constant or within a range.
+  const branches = Array.isArray(r.anyOf) ? (r.anyOf as Record<string, unknown>[]).filter((b) => b && typeof b === 'object') : [];
+  const constant = branches.find((b) => typeof b.const === 'number');
+  const range = branches.find((b) => b !== constant);
+  const special = constant ? { value: constant.const as number, label: str(constant.title) ?? String(constant.const) } : undefined;
   return {
     type,
     title: str(r.title),
     description: str(r.description),
     enum: Array.isArray(r.enum) ? r.enum.map(String) : undefined,
     default: r.default,
-    minimum: num(r.minimum),
-    maximum: num(r.maximum),
+    minimum: num(r.minimum) ?? num(range?.minimum),
+    maximum: num(r.maximum) ?? num(range?.maximum),
     multipleOf: num(r.multipleOf),
     minLength: num(r.minLength),
     maxLength: num(r.maxLength),
@@ -59,6 +69,7 @@ export function normaliseProp(raw: unknown): Prop {
     maxItems: num(r.maxItems),
     properties,
     required: Array.isArray(r.required) ? r.required.filter((x): x is string => typeof x === 'string') : undefined,
+    special,
   };
 }
 
@@ -106,6 +117,7 @@ function validateField(prop: Prop, v: unknown, required: boolean): string | null
     case 'integer': {
       const n = Number(v);
       if (!Number.isFinite(n)) return 'Enter a number';
+      if (prop.special && n === prop.special.value) return null;
       if (prop.type === 'integer' && !Number.isInteger(n)) return 'Enter a whole number';
       if (prop.minimum !== undefined && n < prop.minimum) return `Minimum is ${prop.minimum}`;
       if (prop.maximum !== undefined && n > prop.maximum) return `Maximum is ${prop.maximum}`;
@@ -271,8 +283,8 @@ function FieldControl({ prop, value, onChange, upload, id, label, required }: Fi
       }
       return <input id={id} className="input" type="text" maxLength={prop.maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} autoComplete="off" />;
     case 'number':
-    case 'integer':
-      return (
+    case 'integer': {
+      const input = (
         <input
           id={id}
           className="input"
@@ -285,6 +297,20 @@ function FieldControl({ prop, value, onChange, upload, id, label, required }: Fi
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number.isNaN(e.target.valueAsNumber) ? e.target.value : e.target.valueAsNumber)}
         />
       );
+      if (!prop.special) return input;
+      const { value: specialValue, label: specialLabel } = prop.special;
+      const isSpecial = value === specialValue;
+      const fallback = typeof prop.default === 'number' && prop.default !== specialValue ? prop.default : prop.minimum;
+      return (
+        <div className="row gap-md align-center wrap">
+          {isSpecial ? <input id={id} className="input input-special" type="text" value="—" disabled aria-label={label} /> : input}
+          <label className="check-inline">
+            <input type="checkbox" checked={isSpecial} onChange={(e) => onChange(e.target.checked ? specialValue : fallback)} />
+            {specialLabel}
+          </label>
+        </div>
+      );
+    }
     case 'boolean':
       return (
         <label className="toggle" htmlFor={id}>

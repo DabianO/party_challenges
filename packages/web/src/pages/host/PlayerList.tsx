@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { PlayerPublic } from '@challenge/contract';
 import { ConnectionDot } from '../../components/Leaderboard';
+import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { formatPoints } from '../../lib/time';
 import type { HostCtx } from './hostApi';
 
@@ -34,6 +35,7 @@ export function PlayerList({ ctx }: { ctx: HostCtx }) {
           <li key={p.id} className="player-row-wrap">
             <div className="player-row">
               <ConnectionDot connected={p.connected} />
+              <PlayerAvatar player={p} size={28} />
               <span className="grow player-name">
                 {p.displayName}
                 {entry && (
@@ -76,6 +78,11 @@ export function PlayerList({ ctx }: { ctx: HostCtx }) {
                     <button type="button" className="btn btn-secondary btn-sm" title="Invalidate this player's device so the name can be reclaimed" onClick={() => void free(p)}>
                       Free slot
                     </button>
+                    {p.avatar && (
+                      <button type="button" className="btn btn-secondary btn-sm" title="Take this player's selfie off the big screen" onClick={() => void ctx.act({ action: 'clear-avatar', playerId: p.id })}>
+                        Remove photo
+                      </button>
+                    )}
                     <button type="button" className="btn btn-danger btn-sm" onClick={() => void remove(p)}>
                       Remove
                     </button>

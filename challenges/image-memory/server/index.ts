@@ -94,7 +94,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onTimer(state, tag, ctx, playerId) {
     if (tag === 'hide' && playerId && state.stage[playerId] === 'view') {
-      ctx.schedule('lock', state.config.answerSeconds, playerId);
+      if (state.config.answerSeconds > 0) ctx.schedule('lock', state.config.answerSeconds, playerId); // 0 = no time limit
       return { ...state, stage: { ...state.stage, [playerId]: 'answer' } };
     }
     return state;
@@ -157,7 +157,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     return ui.stack(
       [
         ui.text(`Memorise the image! You get ${c.viewSeconds} seconds to look, then it disappears and a question about it follows.`),
-        ui.caption(`${c.answerSeconds} seconds to answer. A correct answer scores ${c.points} points.`),
+        ui.caption(`${c.answerSeconds > 0 ? `${c.answerSeconds} seconds to answer. ` : ''}A correct answer scores ${c.points} points.`),
       ],
       { gap: 'sm' },
     );

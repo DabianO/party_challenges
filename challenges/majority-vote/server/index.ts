@@ -93,7 +93,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     return state;
   },
 
@@ -175,7 +175,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const c = state.config;
     return ui.stack(
       [
-        ui.text(`Pick one of ${c.options.length} options. Your vote is anonymous and you have ${c.timeLimit} seconds.`),
+        ui.text(`Pick one of ${c.options.length} options. Your vote is anonymous${c.timeLimit > 0 ? ` and you have ${c.timeLimit} seconds` : ''}.`),
         ui.caption(
           c.mode === 'minority'
             ? `Side with the least popular option to score ${c.points} points when the host closes the vote.`

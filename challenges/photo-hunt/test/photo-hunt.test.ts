@@ -53,7 +53,7 @@ const submission = (playerId: string, photo: unknown, judgements: Judgement[] = 
 describe('photo-hunt', () => {
   it('has a consistent v2 manifest with image evidence', () => {
     expect(mod.manifest.id).toBe('photo-hunt');
-    expect(mod.manifest.version).toBe('1.1.0');
+    expect(mod.manifest.version).toBe('1.2.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.category).toBe('chaos');
     expect(mod.manifest.results).toBe('immediate');

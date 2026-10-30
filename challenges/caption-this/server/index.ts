@@ -50,7 +50,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onAttemptStart(state, player, ctx) {
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     // A replay starts with an empty caption.
     const { [player.id]: _previous, ...captions } = state.captions;
     return { ...state, captions };
@@ -99,7 +99,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   introView(state, _player, ctx) {
     return ui.stack(
-      [ui.image(ctx.mediaUrl(state.config.image), { maxHeight: '30vh' }), ui.text(state.config.prompt), ui.caption(`${state.config.timeLimit} seconds. Another player will judge your caption.`)],
+      [ui.image(ctx.mediaUrl(state.config.image), { maxHeight: '30vh' }), ui.text(state.config.prompt), ui.caption(`${state.config.timeLimit > 0 ? `${state.config.timeLimit} seconds. ` : ''}Another player will judge your caption.`)],
       { gap: 'sm' },
     );
   },

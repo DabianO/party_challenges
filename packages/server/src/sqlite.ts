@@ -20,7 +20,7 @@ import type {
 import type { ActivityItem, ScoreLedgerEntry } from '@challenge/contract';
 
 /** Bump when the tables change; add a migration step in SqliteRepository.migrate(). */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 7;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS games (
@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS games (
   activity TEXT NOT NULL DEFAULT '[]',
   results_revealed INTEGER NOT NULL DEFAULT 0,
   standings TEXT,
-  standings_feed TEXT NOT NULL DEFAULT '[]'
+  standings_feed TEXT NOT NULL DEFAULT '[]',
+  spotlight TEXT
 );
 CREATE INDEX IF NOT EXISTS games_code ON games(code);
 
@@ -50,7 +51,8 @@ CREATE TABLE IF NOT EXISTS players (
   session_token_hash TEXT NOT NULL,
   joined_at INTEGER NOT NULL,
   removed_at INTEGER,
-  reclaimable INTEGER NOT NULL DEFAULT 0
+  reclaimable INTEGER NOT NULL DEFAULT 0,
+  avatar TEXT
 );
 CREATE INDEX IF NOT EXISTS players_game ON players(game_id);
 
@@ -173,6 +175,16 @@ const MIGRATE_TO_V5 = `
   ALTER TABLE challenge_instances ADD COLUMN category TEXT NOT NULL DEFAULT '';
 `;
 
+/** v5 → v6: the big screen's spotlight rotation. */
+const MIGRATE_TO_V6 = `
+  ALTER TABLE games ADD COLUMN spotlight TEXT;
+`;
+
+/** v6 → v7: players' selfies. */
+const MIGRATE_TO_V7 = `
+  ALTER TABLE players ADD COLUMN avatar TEXT;
+`;
+
 type Row = Record<string, unknown>;
 
 const json = (v: unknown): string => JSON.stringify(v ?? null);
@@ -213,7 +225,7 @@ export class SqliteRepository implements Repository {
    * Schema versioning via SQLite's user_version. Version 1 was the sequential game model
    * (contract v1); its games cannot run on the board engine (different tables, module
    * versions no longer installed), so a legacy database is backed up and rebuilt.
-   * Versions 2 to 4 are upgraded in place (MIGRATE_TO_V3 … MIGRATE_TO_V5).
+   * Versions 2 to 6 are upgraded in place (MIGRATE_TO_V3 … MIGRATE_TO_V7).
    */
   private migrate(path: string): void {
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
@@ -226,7 +238,9 @@ export class SqliteRepository implements Repository {
       try {
         if (version <= 2) this.db.exec(MIGRATE_TO_V3);
         if (version <= 3) this.db.exec(MIGRATE_TO_V4);
-        this.db.exec(MIGRATE_TO_V5);
+        if (version <= 4) this.db.exec(MIGRATE_TO_V5);
+        if (version <= 5) this.db.exec(MIGRATE_TO_V6);
+        this.db.exec(MIGRATE_TO_V7);
         this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
         this.db.exec('COMMIT');
       } catch (err) {
@@ -264,12 +278,12 @@ export class SqliteRepository implements Repository {
     try {
       db.prepare(
         `INSERT INTO games (id, name, code, host_token_hash, status, settings, branding, created_at, started_at, finished_at, paused, seq, activity, results_revealed,
-           standings, standings_feed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           standings, standings_feed, spotlight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET name=excluded.name, code=excluded.code, host_token_hash=excluded.host_token_hash, status=excluded.status,
            settings=excluded.settings, branding=excluded.branding, started_at=excluded.started_at, finished_at=excluded.finished_at,
            paused=excluded.paused, seq=excluded.seq, activity=excluded.activity, results_revealed=excluded.results_revealed,
-           standings=excluded.standings, standings_feed=excluded.standings_feed`,
+           standings=excluded.standings, standings_feed=excluded.standings_feed, spotlight=excluded.spotlight`,
       ).run(
         game.id,
         game.name,
@@ -287,6 +301,7 @@ export class SqliteRepository implements Repository {
         game.resultsRevealed ? 1 : 0,
         json(game.standings ?? null),
         json(game.standingsFeed ?? []),
+        json(game.spotlight ?? null),
       );
 
       // Children: replace wholesale (documents are small; correctness over cleverness).
@@ -294,10 +309,10 @@ export class SqliteRepository implements Repository {
         db.prepare(`DELETE FROM ${table} WHERE game_id = ?`).run(game.id);
       }
       const insPlayer = db.prepare(
-        `INSERT INTO players (id, game_id, display_name, session_token_hash, joined_at, removed_at, reclaimable) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO players (id, game_id, display_name, session_token_hash, joined_at, removed_at, reclaimable, avatar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const p of game.players) {
-        insPlayer.run(p.id, game.id, p.displayName, p.sessionTokenHash, p.joinedAt, p.removedAt, p.reclaimable ? 1 : 0);
+        insPlayer.run(p.id, game.id, p.displayName, p.sessionTokenHash, p.joinedAt, p.removedAt, p.reclaimable ? 1 : 0, p.avatar ?? null);
       }
       const insInst = db.prepare(
         `INSERT INTO challenge_instances (id, game_id, module_id, module_version, sort_order, title, category, allow_replay, configuration, module_state, phase, availability,
@@ -393,6 +408,7 @@ export class SqliteRepository implements Repository {
         joinedAt: Number(p.joined_at),
         removedAt: num(p.removed_at),
         reclaimable: Boolean(p.reclaimable),
+        avatar: str(p.avatar),
       }),
     );
     const instances = (this.db.prepare('SELECT * FROM challenge_instances WHERE game_id = ? ORDER BY sort_order').all(id) as Row[]).map(
@@ -489,6 +505,7 @@ export class SqliteRepository implements Repository {
       resultsRevealed: Boolean(g.results_revealed),
       standings: parse(g.standings, null),
       standingsFeed: parse(g.standings_feed, []),
+      spotlight: parse(g.spotlight, { current: null, seen: {}, round: [] }) ?? { current: null, seen: {}, round: [] },
       seq: Number(g.seq),
       players,
       instances,

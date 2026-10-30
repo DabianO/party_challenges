@@ -70,7 +70,9 @@ export function useStartChallenge(ctx: PlayCtx) {
 export function BoardScreen({ ctx }: { ctx: PlayCtx }) {
   const { board, game } = ctx.snapshot;
   const { starting, start } = useStartChallenge(ctx);
-  const groups = groupBoard(board);
+  // Where the player is needed right now (e.g. their turn) goes above everything else.
+  const urgent = board.filter((b) => b.urgent);
+  const groups = groupBoard(board.filter((b) => !b.urgent));
   // Headings only once the host has used categories.
   const headed = groups.some((g) => g.category !== '');
   const doneIn = (entries: BoardEntry[]) => entries.filter((b) => b.attempts > 0 && b.status !== 'in_progress').length;
@@ -102,6 +104,11 @@ export function BoardScreen({ ctx }: { ctx: PlayCtx }) {
         )}
       </div>
       {board.length === 0 && <p className="muted">No challenges are available to you yet. Keep an eye on this screen.</p>}
+      {urgent.length > 0 && (
+        <section className="board-urgent stack gap-sm" aria-label="Your turn">
+          {tiles(urgent)}
+        </section>
+      )}
       {headed
         ? groups.map((g) => (
             <section key={g.category} className="board-group stack gap-sm" aria-label={g.category || 'Other challenges'}>
@@ -187,7 +194,7 @@ function Tile({
     <li>
       <button
         type="button"
-        className={`tile status-${entry.status}${playable ? ' is-playable' : ''}${action === null ? ' is-inert' : ''}`}
+        className={`tile status-${entry.status}${playable ? ' is-playable' : ''}${entry.urgent ? ' is-urgent' : ''}${action === null ? ' is-inert' : ''}`}
         disabled={disabled}
         aria-busy={starting || undefined}
         onClick={onClick}
@@ -197,7 +204,7 @@ function Tile({
         <span className="tile-state">
           <span aria-hidden="true">{state.icon}</span> {state.label}
         </span>
-        {entry.note && <span className="tile-note">{entry.note}</span>}
+        {entry.note && <span className={`tile-note${entry.noteTone ? ` tone-${entry.noteTone}` : ''}`}>{entry.note}</span>}
         {timer && <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} size="sm" label="Time left" />}
       </button>
     </li>

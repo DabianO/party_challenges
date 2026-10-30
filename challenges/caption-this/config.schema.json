@@ -4,7 +4,7 @@
   "properties": {
     "image": { "type": "string", "format": "media-ref", "title": "Picture to caption" },
     "prompt": { "type": "string", "title": "Prompt", "default": "Write the funniest caption for this picture", "maxLength": 200 },
-    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 15, "maximum": 600, "default": 90 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "maximum": 600, "default": 90, "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 15 }] },
     "maxLength": { "type": "integer", "title": "Maximum caption length", "minimum": 20, "maximum": 280, "default": 120 },
     "points": { "type": "integer", "title": "Points for an approved caption", "minimum": 1, "maximum": 100, "default": 10 }
   }

@@ -331,7 +331,7 @@ function drawLabels(ctx: CanvasRenderingContext2D, frame: Frame, blobs: BlobSpec
     const r = regions.get(b.slot);
     if (!r || !b.label) continue;
     // Fit the name inside the blob: limited by how deep its heart is.
-    const size = Math.max(10, Math.min(shares ? 34 : 28, r.depth * cell * 0.8, Math.sqrt(r.area) * cell * 0.28));
+    const size = Math.max(9, Math.min(shares ? 26 : 18, r.depth * cell * 0.6, Math.sqrt(r.area) * cell * 0.2));
     if (r.depth * cell < 9) continue;
     const x = box.x + ((r.heart % cols) + 0.5) * cell;
     const y = box.y + (Math.floor(r.heart / cols) + 0.5) * (box.h / rows) - (shares ? size * 0.3 : 0);

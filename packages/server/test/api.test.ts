@@ -399,5 +399,24 @@ describe('REST + WebSocket API', () => {
     const evidence = await fetch(`${baseUrl}/api/evidence`, { method: 'POST', headers, body: form() });
     expect(evidence.status).toBe(201);
     expect(((await evidence.json()) as { ref: string }).ref).toMatch(/^media:\/\//);
+
+    // A selfie becomes the player's picture everywhere; the host can take it off again.
+    const playerOf = async () => (await api<{ snapshot: { players: { displayName: string; icon: string; avatar: string | null }[] } }>(`/api/games/${game.id}`, { token: hostToken })).body.snapshot.players.find((p) => p.displayName === 'Eve')!;
+    expect(await playerOf()).toMatchObject({ icon: expect.any(String), avatar: null });
+    expect((await fetch(`${baseUrl}/api/avatar`, { method: 'POST', headers: { ...headers, 'x-session-token': 'nope' }, body: form() })).status).toBe(401);
+    const notAPicture = new FormData();
+    notAPicture.append('file', new Blob([Buffer.from('%PDF-1.4')], { type: 'application/pdf' }), 'doc.pdf');
+    expect((await fetch(`${baseUrl}/api/avatar`, { method: 'POST', headers, body: notAPicture })).status).toBe(415);
+    expect((await fetch(`${baseUrl}/api/avatar`, { method: 'POST', headers, body: evil })).status).toBe(400);
+    const selfie = await fetch(`${baseUrl}/api/avatar`, { method: 'POST', headers, body: form() });
+    expect(selfie.status).toBe(201);
+    const { ref } = (await selfie.json()) as { ref: string };
+    expect((await playerOf()).avatar).toBe(ref);
+    expect((await fetch(`${baseUrl}/api/avatar`, { method: 'DELETE', headers })).status).toBe(200);
+    expect((await playerOf()).avatar).toBeNull();
+    await fetch(`${baseUrl}/api/avatar`, { method: 'POST', headers, body: form() });
+    const eveId = (await api<{ snapshot: { players: { id: string; displayName: string }[] } }>(`/api/games/${game.id}`, { token: hostToken })).body.snapshot.players.find((p) => p.displayName === 'Eve')!.id;
+    await api(`/api/games/${game.id}/actions`, { method: 'POST', token: hostToken, body: JSON.stringify({ action: 'clear-avatar', playerId: eveId }) });
+    expect((await playerOf()).avatar).toBeNull();
   });
 });

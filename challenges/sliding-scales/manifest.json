@@ -1,0 +1,15 @@
+{
+  "id": "sliding-scales",
+  "name": "Sliding Scales",
+  "version": "1.1.0",
+  "apiVersion": "2",
+  "category": "social",
+  "suggestedCategory": "Hot Takes",
+  "description": "Hot takes on a slider: e.g. the maximum acceptable shower time, 0 to 60 minutes. Answer as many statements as you like and change your mind any time; the big screen shows how the room answered.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

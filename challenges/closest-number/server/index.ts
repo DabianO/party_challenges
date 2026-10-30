@@ -56,7 +56,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     return state;
   },
 
@@ -135,7 +135,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const c = state.config;
     return ui.stack(
       [
-        ui.text(`You get ${c.timeLimit} seconds to estimate a number. Scores are awarded when the host closes this challenge.`),
+        ui.text(`${c.timeLimit > 0 ? `You get ${c.timeLimit} seconds to estimate a number.` : 'Estimate a number.'} Scores are awarded when the host closes this challenge.`),
         ui.caption(c.scoring === 'ranked' ? 'The closest guess gets the most points.' : 'Points shrink with the distance to the real value.'),
       ],
       { gap: 'sm' },

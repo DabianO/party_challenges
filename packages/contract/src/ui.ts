@@ -263,6 +263,55 @@ export interface StopwatchNode {
   stopLabel?: string;
 }
 
+/**
+ * An answer the player can change at any time, without submitting: every change is sent at
+ * once as the live action `{ [action]: { id, value } }` (the module's `onAction`). Shown as a
+ * slider from `min` to `max`, or as one button per entry of `options`. `value: null` means
+ * not answered yet; tapping the slider without moving it answers its current position.
+ */
+export interface LiveAnswerNode {
+  type: 'live-answer';
+  /** Payload key of the live action. */
+  action: string;
+  /** Which question this answers (sent back with every change). */
+  id: string;
+  value: number | null;
+  min: number;
+  max: number;
+  step?: number;
+  /** Shown after the number, e.g. "min" or "%". */
+  unit?: string;
+  /** Words under the slider at these values, e.g. both ends and the middle. */
+  marks?: { value: number; label: string }[];
+  /** One word per step from `min` to `max`, shown instead of the number (e.g. "Mostly agree"). */
+  stepLabels?: string[];
+  /** Where an unanswered slider starts (default: the middle). */
+  start?: number;
+  /** Buttons instead of a slider: one per value. */
+  options?: { value: number; label: string; tone?: Tone }[];
+}
+
+/**
+ * How a group answered on a scale: one column per value or range, as tall as its share of the
+ * answers. For the big screen and results; never shows who answered what.
+ */
+export interface DistributionNode {
+  type: 'distribution';
+  /** In axis order. */
+  columns: { label: string; count: number; tone?: Tone }[];
+  /** Words under the axis: start, middle and end. */
+  axis?: { start?: string; middle?: string; end?: string };
+  /** A line across the chart at a position 0..1 along the axis, e.g. the average. */
+  marker?: { at: number; label: string };
+  /** Index of a column to emphasise, e.g. the viewer's own answer. */
+  highlight?: number;
+  /**
+   * Many narrow columns (a histogram of ranges): no label under every column and only the
+   * tallest column's share, so the axis words carry the scale and the chart stays calm.
+   */
+  compact?: boolean;
+}
+
 /** One player's territory in a `blob-field`. */
 export interface BlobSpec {
   id: string;
@@ -332,6 +381,8 @@ export type UINode =
   | ButtonNode
   | TapPadNode
   | StopwatchNode
+  | LiveAnswerNode
+  | DistributionNode
   | BlobFieldNode;
 
 export type InputNode = ChoicesInputNode | NumberInputNode | TextInputNode | SliderInputNode | ToggleInputNode | FileInputNode;
@@ -467,6 +518,18 @@ export const ui = {
   }),
   tapPad: (action: string, opts: Omit<TapPadNode, 'type' | 'action'> = {}): TapPadNode => ({ type: 'tap-pad', action, ...opts }),
   stopwatch: (name: string, opts: Omit<StopwatchNode, 'type' | 'name'> = {}): StopwatchNode => ({ type: 'stopwatch', name, ...opts }),
+  liveAnswer: (action: string, id: string, value: number | null, opts: Omit<LiveAnswerNode, 'type' | 'action' | 'id' | 'value'>): LiveAnswerNode => ({
+    type: 'live-answer',
+    action,
+    id,
+    value,
+    ...opts,
+  }),
+  distribution: (columns: DistributionNode['columns'], opts: Omit<DistributionNode, 'type' | 'columns'> = {}): DistributionNode => ({
+    type: 'distribution',
+    columns,
+    ...opts,
+  }),
   blobField: (fieldId: string, mode: BlobFieldNode['mode'], grid: { cols: number; rows: number; cells: string }, blobs: BlobSpec[]): BlobFieldNode => ({
     type: 'blob-field',
     fieldId,

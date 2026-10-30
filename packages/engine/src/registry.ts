@@ -56,6 +56,12 @@ export function validateManifest(m: unknown, source: string): Manifest {
   const attempts = (man.attempts as string | undefined) ?? 'once';
   if (!['once', 'repeat'].includes(attempts)) throw new ModuleLoadError(`${source}: manifest.attempts must be once | repeat`);
   if (attempts === 'repeat' && results !== 'immediate') throw new ModuleLoadError(`${source}: attempts "repeat" requires results "immediate"`);
+  if (man.suggestedCategory !== undefined && (typeof man.suggestedCategory !== 'string' || man.suggestedCategory.length > 40)) {
+    throw new ModuleLoadError(`${source}: manifest.suggestedCategory must be a string of at most 40 characters`);
+  }
+  if (man.supersededBy !== undefined && (typeof man.supersededBy !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(man.supersededBy))) {
+    throw new ModuleLoadError(`${source}: manifest.supersededBy must be a module id`);
+  }
   return {
     ...(man as unknown as Manifest),
     attempts: attempts as Manifest['attempts'],

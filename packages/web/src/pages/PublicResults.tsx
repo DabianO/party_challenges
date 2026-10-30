@@ -69,7 +69,7 @@ export function PublicResults() {
         {game.resultsRevealed ? (
           <>
             <Leaderboard entries={leaderboard} showDelta={false} showConnection={false} showCompleted />
-            <ProgressChart entries={leaderboard} playerOrder={players.map((p) => p.id)} challengeCount={challenges.length} />
+            <ProgressChart entries={leaderboard} players={players} challengeCount={challenges.length} />
           </>
         ) : (
           <p className="muted">The host has not revealed the results yet.</p>

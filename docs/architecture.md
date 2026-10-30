@@ -34,6 +34,15 @@ Attempt (per player):     Start ─▶ input open ─▶ locked ─▶ evaluated
                                    (timer / submit / Finish / instance closed)
 ```
 
+**Spotlight.** While the game runs, the big screen's right half shows one module
+`spotlight` item a minute (e.g. a Hot Take and how the room answered it), from every open
+instance that offers any. The engine keeps the rotation in `doc.spotlight` and runs it on a
+timer: every item once per round, the one with the most new answers since it was last shown
+first, otherwise random. It pauses with the game and moves on at once when its instance closes.
+The host can put a chosen item on screen now (`show-spotlight`, optionally `hold` until
+`release-spotlight`). During the game the display is always exactly one screen: the race,
+live panels and the spotlight share a grid of up to 2 × 2 (more rows of two beyond that).
+
 Availability per instance: `open` (everyone), `host-unlocked` (hidden until the host
 unlocks it), `assigned` (only the listed players see and play it).
 

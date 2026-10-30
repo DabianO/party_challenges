@@ -11,6 +11,7 @@ import type {
   JsonSchema,
   Judgement,
   Manifest,
+  NoteTone,
   ResultsTiming,
   ScoreAward,
   Statistics,
@@ -77,6 +78,12 @@ export interface PlayerPublic {
   displayName: string;
   connected: boolean;
   joinedAt: number;
+  /** The player's colour (#rrggbb), the same everywhere in the game. */
+  color: string;
+  /** The player's own icon (an emoji, unique per player), shown when they have no picture. */
+  icon: string;
+  /** The player's selfie (`media://` reference), shown in a circle instead of the icon. */
+  avatar: string | null;
 }
 
 export interface TimerInfo {
@@ -136,6 +143,8 @@ export interface ChallengeInstanceSummary {
   error?: string | null;
   /** Host only: a short human summary of the configuration (first string field). */
   summary?: string;
+  /** Host only: players it is closed for while open for others (`reopen-for-player` gives them another go). */
+  closedFor?: string[];
   /** Main display only: the module's live big-screen panel (`displayPanel`), when it has one and has started. */
   displayPanel?: UINode | null;
 }
@@ -242,6 +251,10 @@ export interface BoardEntry {
   repeat: boolean;
   /** The module's personal feedback (`playerNote`), visible even while results are hidden. */
   note: string | null;
+  /** The note's tone, when the module gave one (`danger`/`warning`: something went wrong). */
+  noteTone: NoteTone | null;
+  /** The player is needed here right now (e.g. their turn): shown on top, highlighted. */
+  urgent: boolean;
   /** Instructions shown before Start (module introView or description). */
   intro: UINode | null;
   /** Live attempt screen while in progress. */
@@ -371,6 +384,37 @@ export interface GameSnapshot {
   standings: PublishedStandings | null;
   /** Main display & host: ranking changes between published standings, newest first. */
   standingsFeed: StandingsFeedItem[];
+  /** Main display & host: the item in the big screen's spotlight right now (module `spotlight`). */
+  spotlight: SpotlightView | null;
+  /** Host only: every item that can be put in the spotlight (`show-spotlight`). */
+  spotlightChoices: SpotlightChoice[];
+}
+
+/** An item the host can put in the big screen's spotlight. */
+export interface SpotlightChoice {
+  instanceId: string;
+  /** The challenge's title. */
+  title: string;
+  itemId: string;
+  label: string;
+  /** New or changed answers so far. */
+  activity: number;
+}
+
+/** One module spotlight item on the big screen, for about a minute. */
+export interface SpotlightView {
+  instanceId: string;
+  /** The challenge's title and category, for the heading. */
+  title: string;
+  category: string;
+  itemId: string;
+  ui: UINode;
+  startedAt: number;
+  endsAt: number;
+  /** How many items take turns in the spotlight. */
+  total: number;
+  /** The host keeps it on screen until they release it (no rotation meanwhile). */
+  held: boolean;
 }
 
 export type GameEventType =
@@ -508,13 +552,21 @@ export type HostAction =
   | { action: 'hide-results' }
   /** Copy the current standings to the big screen (it changes only on this action). */
   | { action: 'publish-standings' }
+  /** Put one spotlight item on the big screen now; `hold` keeps it there until `release-spotlight`. */
+  | { action: 'show-spotlight'; instanceId: string; itemId: string; hold?: boolean }
+  /** Let the spotlight rotate again after a held item (moves on at once). */
+  | { action: 'release-spotlight' }
   | { action: 'unlock-challenge'; instanceId: string }
   | { action: 'relock-challenge'; instanceId: string }
   | { action: 'close-challenge'; instanceId: string }
   | { action: 'reopen-challenge'; instanceId: string }
   | { action: 'reset-challenge'; instanceId: string }
+  /** Give one player another go at a challenge the module closed for them (`closedFor`). */
+  | { action: 'reopen-for-player'; instanceId: string; playerId: string }
   | { action: 'assign-challenge'; instanceId: string; playerIds: string[] }
   | { action: 'remove-player'; playerId: string }
+  /** Take a player's selfie off (e.g. an unsuitable picture); they get their icon back. */
+  | { action: 'clear-avatar'; playerId: string }
   | { action: 'free-player'; playerId: string }
   | { action: 'decide'; assignmentId: string; decision: 'approve' | 'reject'; points?: number; note?: string }
   | { action: 'override'; submissionId: string; decision: 'approve' | 'reject'; points?: number; reason: string }

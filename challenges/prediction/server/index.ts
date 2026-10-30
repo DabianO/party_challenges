@@ -68,7 +68,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onAttemptStart(state, player, ctx) {
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     return state;
   },
 
@@ -172,7 +172,7 @@ export default defineModule<Config, State, Input, Evaluation>({
       [
         ui.text(`${c.question}`),
         ui.caption(
-          `You have ${c.timeLimit} seconds to lock in a prediction. Predictions stay secret; the host resolves the outcome later and correct predictions earn ${c.points} points.`,
+          `${c.timeLimit > 0 ? `You have ${c.timeLimit} seconds to lock` : 'Lock'} in a prediction. Predictions stay secret; the host resolves the outcome later and correct predictions earn ${c.points} points.`,
         ),
       ],
       { gap: 'sm' },

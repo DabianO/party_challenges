@@ -23,6 +23,8 @@ export function ChallengeScreen({ ctx, instanceId }: { ctx: PlayCtx; instanceId:
   const showOutcome = entry !== undefined && status !== 'in_progress' && revealed && (entry.result !== null || entry.points !== null);
   const { closeChallenge } = ctx;
   const note = entry?.note ?? null;
+  // The module flagged a problem with the answer (e.g. above the maximum): no "Locked in ✓".
+  const warning = entry?.noteTone === 'danger' || entry?.noteTone === 'warning' ? entry.noteTone : null;
   const again = entry?.repeat === true && status === 'available';
   const [offerNext, setOfferNext] = useState(false);
 
@@ -33,40 +35,55 @@ export function ChallengeScreen({ ctx, instanceId }: { ctx: PlayCtx; instanceId:
     if (was === 'in_progress' && status !== 'in_progress') {
       // The module's personal feedback (e.g. reaction time) rides along with the lock-in message.
       if (status === 'missed') toast(note ? `Time's up! ${note}` : "Time's up!", 'warning');
+      else if (warning && note) toast(note, warning);
       else if (status !== undefined) toast(note ? `Locked in ✓ ${note}` : 'Answer locked in ✓', 'success');
-      if (again) setOfferNext(true);
+      // A refused answer stays on screen (with its warning) until the player leaves.
+      if (again || warning) setOfferNext(true);
       else closeChallenge();
       return;
     }
     // Nothing to show here outside a live attempt, a revealed result or the offer to go on: back to the board.
-    if (status !== 'in_progress' && !showOutcome && !(offerNext && again)) closeChallenge();
-  }, [status, showOutcome, closeChallenge, toast, note, again, offerNext]);
+    if (status !== 'in_progress' && !showOutcome && !(offerNext && (again || warning))) closeChallenge();
+  }, [status, showOutcome, closeChallenge, toast, note, warning, again, offerNext]);
 
   if (!entry) return null;
   if (status === 'in_progress') return <Live ctx={ctx} entry={entry} />;
-  if (offerNext && again) return <Next ctx={ctx} entry={entry} />;
+  if (offerNext && (again || warning)) return <Next ctx={ctx} entry={entry} canContinue={again} />;
   if (showOutcome) return <Outcome ctx={ctx} entry={entry} />;
   return null;
 }
 
-/** A repeat challenge just took the player's answer and they may go again straight away. */
-function Next({ ctx, entry }: { ctx: PlayCtx; entry: BoardEntry }) {
+/**
+ * A repeat challenge just took the player's answer and they may go again straight away, or
+ * the module refused the answer (a warning note), whether or not they may go again.
+ */
+function Next({ ctx, entry, canContinue }: { ctx: PlayCtx; entry: BoardEntry; canContinue: boolean }) {
   const { starting, start } = useStartChallenge(ctx);
   const paused = ctx.snapshot.game.paused;
+  const problem = entry.noteTone === 'danger' || entry.noteTone === 'warning';
   return (
     <section className="stack gap-md">
       <BackBar ctx={ctx} title={entry.title} />
-      <div className="stack gap-xs center-text">
-        <p className="eyebrow">Answer saved</p>
-        {entry.note && <h2>{entry.note}</h2>}
-      </div>
-      <button type="button" className="btn btn-primary btn-lg" disabled={starting !== null || paused} onClick={() => void start(entry.instanceId)}>
-        {starting ? 'Starting…' : `▶ ${entry.statusText ?? 'Continue'}`}
-      </button>
-      <button type="button" className="btn btn-secondary" onClick={ctx.closeChallenge}>
+      {problem && entry.note ? (
+        <div className={`card next-warning tone-${entry.noteTone}`} role="alert">
+          <p className="eyebrow">Not accepted</p>
+          <h2>{entry.note}</h2>
+        </div>
+      ) : (
+        <div className="stack gap-xs center-text">
+          <p className="eyebrow">Answer saved</p>
+          {entry.note && <h2>{entry.note}</h2>}
+        </div>
+      )}
+      {canContinue && (
+        <button type="button" className="btn btn-primary btn-lg" disabled={starting !== null || paused} onClick={() => void start(entry.instanceId)}>
+          {starting ? 'Starting…' : `▶ ${entry.statusText ?? 'Continue'}`}
+        </button>
+      )}
+      <button type="button" className={`btn ${canContinue ? 'btn-secondary' : 'btn-primary btn-lg'}`} onClick={ctx.closeChallenge}>
         Back to challenges
       </button>
-      <p className="muted small center-text">You can also come back to this later from the board.</p>
+      {canContinue && <p className="muted small center-text">You can also come back to this later from the board.</p>}
     </section>
   );
 }

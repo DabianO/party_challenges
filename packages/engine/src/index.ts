@@ -8,3 +8,4 @@ export * from './statistics.ts';
 export * from './validation.ts';
 export { generateGameCode, normalizeGameCode, newId, newToken, hashToken, createSeededRng } from './ids.ts';
 export * from './standings.ts';
+export * from './spotlight.ts';

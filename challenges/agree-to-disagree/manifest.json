@@ -1,0 +1,15 @@
+{
+  "id": "agree-to-disagree",
+  "name": "Agree to Disagree",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "social",
+  "suggestedCategory": "Hot Takes",
+  "description": "Hot takes to agree or disagree with: e.g. pineapple belongs on pizza, from fully agree to fully disagree. Answer as many statements as you like and change your mind any time; the big screen shows where the room stands.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

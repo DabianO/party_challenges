@@ -17,7 +17,8 @@ function snippet(text: string, max = 110): string {
 
 export function Library({ modules, onPick, onClose }: { modules: ModuleInfo[]; onPick: (m: ModuleInfo) => void; onClose: () => void }) {
   const groups = new Map<string, ModuleInfo[]>();
-  for (const m of modules) {
+  // Replaced modules stay installed for the games that use them, but are not offered.
+  for (const m of modules.filter((x) => !x.manifest.supersededBy)) {
     const list = groups.get(m.manifest.category) ?? [];
     list.push(m);
     groups.set(m.manifest.category, list);

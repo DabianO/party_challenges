@@ -58,7 +58,7 @@ function play(state: State, ctx: InstanceContext, who: PlayerRef, succeeded: boo
 
 describe('secret-word', () => {
   it('has a consistent manifest: automatic, immediate, one word per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.0.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.1.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -92,7 +92,7 @@ describe('secret-word', () => {
     const { ctx } = fakeCtx([ada]);
     let state = mod.createInstance(config, ctx);
     for (let i = 0; i < 5; i++) state = play(state, ctx, ada, i % 2 === 0).state;
-    expect(mod.canStart!(state, ada, ctx)).toEqual({ ok: false, reason: 'All your words are done' });
+    expect(mod.canStart!(state, ada, ctx)).toEqual({ ok: false, reason: 'All your words are done', finished: true });
     expect(mod.playerNote!(state, ada, ctx)).toBe('5/5 words · 3 unnoticed');
 
     // Uneven: 10 points at 3 per word = 3 words; more per word than the maximum = 1 word worth the maximum.

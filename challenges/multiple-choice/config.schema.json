@@ -17,12 +17,12 @@
       "description": "Zero-based index into the options list (0 = A, 1 = B, ...).",
       "minimum": 0
     },
-    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "minimum": 5, "maximum": 600, "default": 20 },
+    "timeLimit": { "type": "integer", "title": "Time limit (seconds)", "maximum": 600, "default": 20, "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }] },
     "points": { "type": "integer", "title": "Points for a correct answer", "minimum": 1, "maximum": 1000, "default": 10 },
     "speedBonus": {
       "type": "boolean",
       "title": "Speed bonus",
-      "description": "Correct answers earn up to 50% extra, scaled by how quickly they were given within the time limit.",
+      "description": "Correct answers earn up to 50% extra, scaled by how quickly they were given within the time limit (none without a time limit).",
       "default": true
     },
     "media": { "type": "string", "format": "media-ref", "title": "Image (optional)" }

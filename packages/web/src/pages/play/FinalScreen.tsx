@@ -53,7 +53,7 @@ export function FinalScreen({ ctx }: { ctx: PlayCtx }) {
       </div>
       <div className="stack gap-sm">
         <h2 className="section-title">The race</h2>
-        <ProgressChart entries={leaderboard} playerOrder={ctx.snapshot.players.map((p) => p.id)} challengeCount={ctx.snapshot.challenges.length} meId={ctx.meId} height={260} />
+        <ProgressChart entries={leaderboard} players={ctx.snapshot.players} challengeCount={ctx.snapshot.challenges.length} meId={ctx.meId} height={260} />
       </div>
       {leaderboard.length > 3 && (
         <div className="stack gap-sm">

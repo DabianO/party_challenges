@@ -125,6 +125,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
           )}
         </div>
         {running && <BigScreenPanel ctx={ctx} busy={busy} onUpdate={() => void act({ action: 'publish-standings' })} />}
+        {running && ctx.snapshot.spotlightChoices.length > 0 && <SpotlightPanel ctx={ctx} busy={busy} act={act} />}
         {(running || finished) && (
           <div className={`reveal-panel${game.resultsRevealed ? ' is-revealed' : ''}`}>
             <span className="grow stack gap-xs">
@@ -195,7 +196,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         <section className="stack gap-sm">
           <h2 className="section-title">Leaderboard</h2>
           <Leaderboard entries={leaderboard} showCompleted />
-          <ProgressChart entries={leaderboard} playerOrder={players.map((p) => p.id)} challengeCount={challenges.length} />
+          <ProgressChart entries={leaderboard} players={players} challengeCount={challenges.length} />
         </section>
       )}
 
@@ -207,6 +208,70 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         <h2 className="section-title">Activity</h2>
         <ActivityFeed items={activity} clockOffset={ctx.clockOffset} limit={40} />
       </section>
+    </div>
+  );
+}
+
+/**
+ * What the big screen's spotlight shows (e.g. a Hot Take). It rotates by itself; the host can
+ * put a chosen item on screen now, for a minute or held until they release it.
+ */
+function SpotlightPanel({ ctx, busy, act }: { ctx: HostCtx; busy: boolean; act: Act }) {
+  const { spotlight, spotlightChoices } = ctx.snapshot;
+  const keyOf = (c: { instanceId: string; itemId: string }) => `${c.instanceId}/${c.itemId}`;
+  const [picked, setPicked] = useState('');
+  const [hold, setHold] = useState(false);
+  const choice = spotlightChoices.find((c) => keyOf(c) === picked) ?? spotlightChoices[0];
+  const onScreen = spotlight ? spotlightChoices.find((c) => keyOf(c) === keyOf(spotlight)) : undefined;
+  // Grouped per challenge, in board order.
+  const groups = new Map<string, typeof spotlightChoices>();
+  for (const c of spotlightChoices) groups.set(c.instanceId, [...(groups.get(c.instanceId) ?? []), c]);
+
+  return (
+    <div className="screen-panel spotlight-panel">
+      <span className="grow stack gap-xs">
+        <strong>
+          🗣 Spotlight: {onScreen ? `“${onScreen.label}”` : 'nothing on screen yet'}
+          {spotlight?.held ? ' · held' : ''}
+        </strong>
+        <span className="muted small">
+          {spotlight?.held
+            ? 'It stays on the big screen until you continue the rotation.'
+            : 'A new statement every minute: the one with the most new answers, every one in turn. Pick one to show it now.'}
+        </span>
+      </span>
+      {spotlight?.held && (
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act({ action: 'release-spotlight' })}>
+          ▶ Continue rotation
+        </button>
+      )}
+      <div className="spotlight-pick">
+        <label className="sr-only" htmlFor="spotlight-pick">
+          Statement to show
+        </label>
+        <select id="spotlight-pick" className="input" value={choice ? keyOf(choice) : ''} disabled={busy} onChange={(e) => setPicked(e.target.value)}>
+          {[...groups.values()].map((items) => (
+            <optgroup key={items[0]!.instanceId} label={items[0]!.title}>
+              {items.map((c) => (
+                <option key={keyOf(c)} value={keyOf(c)}>
+                  {c.label} ({c.activity} {c.activity === 1 ? 'answer change' : 'answer changes'})
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <label className="checkbox-inline">
+          <input type="checkbox" checked={hold} disabled={busy} onChange={(e) => setHold(e.target.checked)} /> Keep it on screen
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy || !choice}
+          onClick={() => choice && void act({ action: 'show-spotlight', instanceId: choice.instanceId, itemId: choice.itemId, hold })}
+        >
+          📺 Show now
+        </button>
+      </div>
     </div>
   );
 }

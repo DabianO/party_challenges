@@ -50,7 +50,7 @@ const sub = (playerId: string, answer: unknown, startedAt: number, elapsedMs: nu
 describe('multiple-choice', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('multiple-choice');
-    expect(mod.manifest.version).toBe('2.1.0');
+    expect(mod.manifest.version).toBe('2.2.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');

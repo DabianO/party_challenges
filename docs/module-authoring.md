@@ -78,7 +78,9 @@ Consequences for module code:
 | `evaluation.deadlineSeconds` | Optional per-module override of the judge deadline. |
 | `results` | `immediate` — each submission is evaluated on its own as soon as the attempt locks (after judging). `onClose` — evaluation runs once over all submissions when the host closes the challenge (ranking, votes, predictions). `onClose` modules must be `automatic`. |
 | `resubmission` | `none` (default: submitting locks the attempt) or `replace` (a client may replace the answer until the timer fires or it sends FINISH). The web client always locks on the first submit (`final: true`), so design `guestView` around a single submit. |
-| `attempts` | `once` (default; the host may still enable best-of replays) or `repeat`: taking part repeatedly *is* the challenge. Players may always start a new attempt, every attempt is scored and the points add up; gate who may start with `canStart`. `immediate` results only. Examples: `group-message`, `secret-word`. After a repeat attempt locks, a player who may start again straight away is offered to continue on the same screen. |
+| `attempts` | `once` (default; the host may still enable best-of replays) or `repeat`: taking part repeatedly *is* the challenge. Players may always start a new attempt, every attempt is scored and the points add up; gate who may start with `canStart`. `immediate` results only. Examples: `group-message`, `secret-word`, `report-score`. After a repeat attempt locks, a player who may start again straight away is offered to continue on the same screen. |
+| `suggestedCategory` | Optional, at most 40 characters: pre-filled as the challenge's category when the host adds it (e.g. `"Hot Takes"`). The host can change it. |
+| `supersededBy` | Optional module id that replaces this one. The host's library stops offering the module; games and setup files that use it keep working. Keep the module installed. |
 | `capabilities` | Declare everything you use (`timer`, `image`, `text-input`, `numeric-input`, `multiple-choice`, `evidence-upload`, `statistics`, …). |
 
 ## 2. config.schema.json
@@ -88,6 +90,13 @@ validates against it and applies `default`s (MR-7). Supported field types in the
 generator: `string` (with optional `enum`, `maxLength`, `format: "media-ref"` for image
 upload), `number`/`integer` (with `minimum`/`maximum`), `boolean`, and `array` of
 `string` or of flat `object`s. Use `title` and `description` for labels and help text.
+
+A number with one special value besides its range is written as
+`"anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 5 }]` (put `maximum` and
+`default` on the field itself). The form shows the range as the number field and the
+constant as a checkbox labelled with its title. Every per-player time limit offers
+"No time limit" this way: the module then skips `ctx.schedule('lock', …)` and the attempt
+lasts until the player locks in or the host closes the challenge.
 
 ## 3. server/index.ts
 
@@ -129,12 +138,23 @@ evaluated → scored.
 1b. **`canStart(state, player, ctx)`** (optional) adds a gate on top of the engine's
    availability, e.g. turn-taking. Return `{ ok: true, hint? }` (the hint shows on the
    player's tile, e.g. "Your turn!") or `{ ok: false, reason }` (the tile shows a waiting
-   state with the reason; starting is refused). It is called for every player on every
-   snapshot, so keep it pure and cheap.
+   state with the reason; starting is refused). `{ ok: true, urgent: true }` means the player
+   is needed right now (`group-message`: their turn): their board puts the tile on top in its
+   own colour, also while their attempt runs. Add `finished: true` when the player has
+   nothing left to do (all words played, score reported): a repeat module's tile then shows
+   as done instead of waiting. It is called for every player on every snapshot, so keep it
+   pure and cheap.
 1c. **`playerNote(state, player, ctx)`** (optional) returns a short personal line for the
    player's tile and lock-in message, e.g. `"312 ms · best 287 ms"`. It is shown even while
    the host keeps results hidden, so use it for practice feedback, not to give away answers.
-1d. **Live actions** (optional, implement both): `validateAction` / `onAction(state, player,
+   Return `{ text, tone }` to colour it: `danger`/`warning` replaces the "Locked in ✓" message
+   with a warning, and in a repeat module the "continue" screen shows it as "Not accepted"
+   (`report-score`: a number above the maximum costs points and must be filled in again).
+1d. **`closedFor(state, ctx)` / `reopenFor(state, player, ctx)`** (optional, implement both)
+   let a module close a still-open challenge for single players (`report-score`: a number
+   above the maximum). `closedFor` lists their ids; the host sees them on the challenge in the
+   Run tab and can give each another go (`reopen-for-player`), which calls `reopenFor`.
+1e. **Live actions** (optional, implement both): `validateAction` / `onAction(state, player,
    payload, ctx)` take rapid input that is *not* a submission, e.g. taps from a
    `ui.tapPad('pump')` (payload `{ pump: tapsSinceLastBatch }`, sent every ~300 ms). Only
    accepted while the player's attempt is in progress and the instance is ACTIVE; nothing is
@@ -144,7 +164,7 @@ evaluated → scored.
    the live action `{ clock: 'start' }`, Stop submits `{ clock: elapsedMs }` measured between
    the two touches, so Wi-Fi delay does not count. Note the server time in `onAction` and
    compare it with the submission to catch implausible times. Example: `stop-the-clock`.
-1e. **`displayPanel(state, ctx)`** (optional) is a live panel for the big screen, shown next
+1f. **`displayPanel(state, ctx)`** (optional) is a live panel for the big screen, shown next
    to the race graph while the instance is open and as the closing picture after it closes
    or the game ends. Everyone sees it, so never leak answers. `ui.blobField(fieldId, 'live' |
    'final', { cols, rows, cells }, blobs)` renders a territory map: `cells` is one character
@@ -152,7 +172,20 @@ evaluated → scored.
    names its `slot`, `color` (#rrggbb), `label`, `share` and an optional `pulse` counter
    (a glow when it rises). Live it is drawn as embossed liquid that flows between snapshots;
    final as a gapless picture with every share (empty cells join the nearest territory).
-1f. **`onPlayerJoin(state, player, ctx)`** (optional) runs for every ACTIVE instance when a
+1g. **`spotlight(state, ctx)`** (optional) returns items for the big screen's spotlight:
+   `{ id, ui, activity }[]`, e.g. one per statement with how the room answered it. The engine
+   shows one item a minute from all open instances that have any: every item once per round,
+   the item whose `activity` grew most since it was last shown first, otherwise at random.
+   Raise `activity` on every new or changed answer. Everyone sees it: aggregate answers only.
+   `ui.distribution(columns, { axis, marker, highlight, compact })` draws a column chart of answers
+   on a scale. Example: the Hot Takes modules (`sliding-scales`, `rivalries`, `binaries`,
+   `likelihoods`, `agree-to-disagree`).
+   **Answers that stay open:** `ui.liveAnswer('answer', id, value, { min, max, step, unit,
+   marks, stepLabels, start, options })` is a slider (or buttons, with `options`) that sends
+   every change as the live action `{ answer: { id, value } }`, with no submit, so players can
+   change their minds until the instance closes. Pair it with `results: "onClose"` and score
+   from state, like the Hot Takes modules.
+1h. **`onPlayerJoin(state, player, ctx)`** (optional) runs for every ACTIVE instance when a
    new player joins the game, before they start anything, e.g. to give them a place on a
    shared field right away.
 2. **`onAttemptStart(state, player, ctx)`** runs when a player starts the challenge (and
@@ -197,6 +230,9 @@ evaluated → scored.
   the server's own measurement (start action → submission) and uses the server's time otherwise.
 - Player names come from `ctx.players()`; store `displayName` in evaluation rows so
   `resultsView` can render without a roster lookup.
+- Colour players with `player.color` (#rrggbb, from `ctx.players()` or the `PlayerRef` you
+  get): every player keeps one colour for the whole game, the same as in the race graph.
+  `playerColor(index)` from the contract is the palette behind it.
 - Use `ctx.mediaUrl(ref)` to turn a `media://…` config value into a URL for `ui.image`.
 
 ## 4. Building UI

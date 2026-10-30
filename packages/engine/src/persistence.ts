@@ -26,6 +26,8 @@ export interface PersistedPlayer {
   removedAt: number | null;
   /** True when the host freed the slot (FR-34); the next join with this name reclaims it. */
   reclaimable: boolean;
+  /** The player's selfie (`media://` reference); absent or null = their icon. */
+  avatar?: string | null;
 }
 
 export interface PersistedSubmission {
@@ -86,6 +88,26 @@ export interface PersistedTimer {
   remainingMs: number | null;
 }
 
+/** The big screen's spotlight rotation (see spotlight.ts). */
+export interface SpotlightState {
+  /** What is on screen: `key` is `<instanceId>/<itemId>`. */
+  current: {
+    key: string;
+    instanceId: string;
+    itemId: string;
+    startedAt: number;
+    endsAt: number;
+    /** How many items were taking turns when this one was picked. */
+    total: number;
+    /** Put there by the host to stay until released. */
+    held?: boolean;
+  } | null;
+  /** key → the item's `activity` when it was last on screen. */
+  seen: Record<string, number>;
+  /** Keys shown in the current round (every item once before repeats). */
+  round: string[];
+}
+
 export interface PersistedInstance {
   id: string;
   gameId: string;
@@ -138,6 +160,8 @@ export interface PersistedGame {
   standings: PublishedStandings | null;
   /** Ranking changes between publications, oldest first (capped). */
   standingsFeed: StandingsFeedItem[];
+  /** Big-screen spotlight rotation over module `spotlight` items. */
+  spotlight: SpotlightState;
   seq: number;
   players: PersistedPlayer[];
   instances: PersistedInstance[];

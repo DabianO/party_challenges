@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import type { LeaderboardEntry } from '@challenge/contract';
+import { resolveMedia } from '../lib/media';
 import { formatPoints } from '../lib/time';
 
 /**
  * Points over challenges finished: one line per player, x = how many challenges they have
  * finished (in their own order), y = running total. Data: `LeaderboardEntry.series`.
  *
- * Colour follows the player, never the rank: up to 8 players get the categorical slots in
- * join order. With more players the current top 8 (plus "you") are drawn in colour, again
- * ordered by join order, and everyone else as thin "Others" lines. The leaderboard next to
- * the chart is its table view.
+ * Colour follows the player, never the rank: every line has the player's own colour
+ * (`PlayerPublic.color`, the same as in Blob War and anywhere else) and ends in the player's
+ * picture or icon. The legend lists the players in rank order, so it doubles as the ranking.
  */
 /** What the chart needs per player (a leaderboard entry or a published standing). */
 export type ChartEntry = Pick<LeaderboardEntry, 'playerId' | 'displayName' | 'rank' | 'total' | 'series'>;
@@ -17,8 +17,8 @@ export type ChartEntry = Pick<LeaderboardEntry, 'playerId' | 'displayName' | 'ra
 export interface ProgressChartProps {
   /** In rank order. */
   entries: ChartEntry[];
-  /** Player ids in join order (stable colour assignment). */
-  playerOrder: string[];
+  /** The players' colours and pictures (`PlayerPublic`). */
+  players: { id: string; color: string; icon?: string; avatar?: string | null }[];
   /** Number of challenges on the board: the x-axis runs 0..this. */
   challengeCount: number;
   meId?: string | null;
@@ -27,19 +27,21 @@ export interface ProgressChartProps {
   fillHeight?: boolean;
   /** Draw the lines in on mount (remount with a new `key` to replay, e.g. per update). */
   animate?: boolean;
-  /** Prefix the end labels with the rank. */
+  /** Prefix the legend entries with the rank. */
   showRank?: boolean;
+  /** Show the colour legend above the chart (off when the page has its own player key). */
+  legend?: boolean;
   size?: 'md' | 'lg';
 }
 
-const SLOTS = 8;
-const MARGIN = { top: 14, right: 132, bottom: 40, left: 48 };
-const LABEL_GAP = 16;
-const LABEL_GAP_LG = 26;
+const MARGIN = { top: 14, right: 16, bottom: 40, left: 48 };
+const FALLBACK_COLOR = 'var(--text-muted)';
 
 interface Line {
   entry: ChartEntry;
-  slot: number | null; // null = "Others"
+  color: string;
+  icon: string | null;
+  avatar: string | null;
   me: boolean;
 }
 
@@ -56,28 +58,16 @@ function ticks(min: number, max: number, step: number): number[] {
   return out;
 }
 
-/** Push labels apart vertically so they never overlap (keeps their order). */
-function spread(ys: number[], gap: number, min: number, max: number): number[] {
-  const order = ys.map((y, i) => [y, i] as const).sort((a, b) => a[0] - b[0]);
-  const placed = order.map(([y]) => y);
-  for (let i = 1; i < placed.length; i++) placed[i] = Math.max(placed[i]!, placed[i - 1]! + gap);
-  const overflow = (placed.at(-1) ?? 0) - max;
-  if (overflow > 0) for (let i = 0; i < placed.length; i++) placed[i] = placed[i]! - overflow;
-  for (let i = 0; i < placed.length; i++) placed[i] = Math.max(placed[i]!, min + i * gap);
-  const out = new Array<number>(ys.length);
-  order.forEach(([, idx], k) => (out[idx] = placed[k]!));
-  return out;
-}
-
 export function ProgressChart({
   entries,
-  playerOrder,
+  players,
   challengeCount,
   meId,
   height: fixedHeight = 320,
   fillHeight = false,
   animate = false,
   showRank = false,
+  legend: showLegend = true,
   size = 'md',
 }: ProgressChartProps) {
   const wrapRef = useRef<HTMLElement>(null);
@@ -97,25 +87,19 @@ export function ProgressChart({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const legendHeight = legendRef.current?.offsetHeight ?? 32;
+  const legendHeight = showLegend ? (legendRef.current?.offsetHeight ?? 32) : 0;
   const height = fillHeight ? Math.max(220, boxHeight - legendHeight - 8) : fixedHeight;
-  const margin = size === 'lg' ? { ...MARGIN, right: 190, left: 56, bottom: 48 } : MARGIN;
+  const margin = size === 'lg' ? { ...MARGIN, right: 24, left: 56, bottom: 48 } : MARGIN;
 
   const lines = useMemo<Line[]>(() => {
-    const joinIndex = (id: string) => {
-      const i = playerOrder.indexOf(id);
-      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
-    };
-    let highlighted = entries;
-    if (entries.length > SLOTS) {
-      // Leaderboard order = rank order: keep the top players (and yourself) in colour.
-      const top = entries.slice(0, SLOTS);
-      const me = entries.find((e) => e.playerId === meId);
-      highlighted = me && !top.includes(me) ? [...top.slice(0, SLOTS - 1), me] : top;
-    }
-    const slotOf = new Map([...highlighted].sort((a, b) => joinIndex(a.playerId) - joinIndex(b.playerId)).map((e, i) => [e.playerId, i] as const));
-    return entries.map((entry) => ({ entry, slot: slotOf.get(entry.playerId) ?? null, me: entry.playerId === meId }));
-  }, [entries, playerOrder, meId]);
+    const byId = new Map(players.map((p) => [p.id, p] as const));
+    return entries.map((entry) => {
+      const p = byId.get(entry.playerId);
+      return { entry, color: p?.color ?? FALLBACK_COLOR, icon: p?.icon ?? null, avatar: p?.avatar ? (resolveMedia(p.avatar) ?? null) : null, me: entry.playerId === meId };
+    });
+  }, [entries, players, meId]);
+  const clipBase = useId().replace(/[^A-Za-z0-9_-]/g, '');
+  const markerR = size === 'lg' ? 12 : 9;
 
   const longest = Math.max(0, ...entries.map((e) => e.series.length - 1));
   const maxX = Math.max(1, challengeCount, longest);
@@ -135,14 +119,7 @@ export function ProgressChart({
   const xTicks = ticks(0, maxX, xStep).filter((t) => Number.isInteger(t));
   const yTicks = ticks(yMin, yMax, yStep);
 
-  const coloured = lines.filter((l) => l.slot !== null && l.entry.series.length > 0);
-  const others = lines.filter((l) => l.slot === null && l.entry.series.length > 0);
-  const labelYs = spread(
-    coloured.map((l) => sy(l.entry.series.at(-1)!)),
-    size === 'lg' ? LABEL_GAP_LG : LABEL_GAP,
-    margin.top + 6,
-    margin.top + plotH,
-  );
+  const drawn = lines.filter((l) => l.entry.series.length > 0);
   const path = (series: number[]) => series.map((v, i) => `${i === 0 ? 'M' : 'L'}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ');
 
   const toX = (clientX: number, rect: DOMRect) => {
@@ -169,7 +146,8 @@ export function ProgressChart({
   const flip = tooltipLeft > width / 2;
 
   const empty = entries.every((e) => e.series.length <= 1);
-  const legend = [...coloured].sort((a, b) => a.slot! - b.slot!);
+  // Entries come in rank order: the legend is the ranking too.
+  const legend = drawn;
   return (
     <figure
       className={`viz-root progress-chart progress-chart-${size}${fillHeight ? ' progress-chart-fill' : ''}${animate ? ' is-animated' : ''}`}
@@ -179,20 +157,15 @@ export function ProgressChart({
         <p className="muted progress-chart-empty">The graph fills in as players finish challenges.</p>
       ) : (
         <>
-          <ul className="viz-legend" aria-label="Players" ref={legendRef}>
+          {showLegend && <ul className="viz-legend" aria-label="Players" ref={legendRef}>
             {legend.map((l) => (
               <li key={l.entry.playerId} className={l.me ? 'is-me' : undefined}>
-                <span className="viz-key" style={{ background: `var(--series-${l.slot! + 1})` }} aria-hidden="true" />
+                <span className="viz-key" style={{ background: l.color }} aria-hidden="true" />
+                {showRank && <span className="viz-legend-rank">{l.entry.rank}.</span>}
                 {l.entry.displayName}
               </li>
             ))}
-            {others.length > 0 && (
-              <li>
-                <span className="viz-key viz-key-other" aria-hidden="true" />
-                Others ({others.length})
-              </li>
-            )}
-          </ul>
+          </ul>}
           <svg
             width={width}
             height={height}
@@ -226,32 +199,28 @@ export function ProgressChart({
               Points
             </text>
 
-            {others.map((l) => (
-              <path key={l.entry.playerId} className="viz-line viz-line-other" d={path(l.entry.series)} />
-            ))}
-            {coloured.map((l, i) => {
+            {drawn.map((l, i) => {
               const s = l.entry.series;
-              const ex = sx(s.length - 1);
-              const ey = sy(s.at(-1)!);
-              const ly = labelYs[i]!;
-              const lx = margin.left + plotW + 10;
               return (
                 <g key={l.entry.playerId}>
-                  <path className={`viz-line${l.me ? ' is-me' : ''}`} d={path(s)} pathLength={1} style={{ stroke: `var(--series-${l.slot! + 1})`, animationDelay: `${i * 90}ms` }} />
-                  {/* Hairline from the line's end to its label in the right gutter. */}
-                  <line className="viz-connector" x1={ex} y1={ey} x2={lx - 2} y2={ly} />
-                  <circle className="viz-end" cx={ex} cy={ey} r={4} style={{ fill: `var(--series-${l.slot! + 1})` }} />
-                  <text className="viz-label" x={lx} y={ly} dominantBaseline="middle">
-                    {showRank && (
-                  <tspan className="viz-label-rank">
-                    {l.entry.rank}.{' '}
-                  </tspan>
-                )}
-                <tspan className="viz-label-name">{l.entry.displayName.length > 12 ? `${l.entry.displayName.slice(0, 11)}…` : l.entry.displayName}</tspan>
-                    <tspan className="viz-label-value" dx={6}>
-                      {formatPoints(l.entry.total)}
-                    </tspan>
-                  </text>
+                  <path className={`viz-line${l.me ? ' is-me' : ''}`} d={path(s)} pathLength={1} style={{ stroke: l.color, animationDelay: `${i * 90}ms` }} />
+                  {/* The player's picture or icon instead of a dot, ringed in their colour. */}
+                  <g className="viz-end" transform={`translate(${sx(s.length - 1).toFixed(1)},${sy(s.at(-1)!).toFixed(1)})`}>
+                    <circle r={markerR + 2} style={{ fill: l.color }} />
+                    <circle r={markerR} className="viz-end-face" />
+                    {l.avatar ? (
+                      <>
+                        <clipPath id={`${clipBase}-${i}`}>
+                          <circle r={markerR} />
+                        </clipPath>
+                        <image href={l.avatar} x={-markerR} y={-markerR} width={markerR * 2} height={markerR * 2} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipBase}-${i})`} />
+                      </>
+                    ) : l.icon ? (
+                      <text className="viz-end-icon" textAnchor="middle" dominantBaseline="central" fontSize={markerR * 1.15}>
+                        {l.icon}
+                      </text>
+                    ) : null}
+                  </g>
                 </g>
               );
             })}
@@ -266,7 +235,7 @@ export function ProgressChart({
               {readout.length === 0 && <div className="muted small">Nobody got this far yet</div>}
               {readout.slice(0, 10).map((r) => (
                 <div key={r.entry.playerId} className="viz-tooltip-row">
-                  <span className={`viz-key${r.slot === null ? ' viz-key-other' : ''}`} style={r.slot === null ? undefined : { background: `var(--series-${r.slot + 1})` }} aria-hidden="true" />
+                  <span className="viz-key" style={{ background: r.color }} aria-hidden="true" />
                   <strong>{formatPoints(r.value)}</strong>
                   <span className="muted">{r.entry.displayName}</span>
                 </div>

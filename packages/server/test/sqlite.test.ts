@@ -9,8 +9,13 @@ function sampleGame(): PersistedGame {
   doc.resultsRevealed = true;
   doc.standings = { publishedAt: 5_000, entries: [{ playerId: 'p1', displayName: 'Ada', rank: 1, total: 5.5, completed: 1, series: [0, 5.5] }] };
   doc.standingsFeed = [{ id: 'sf1', at: 5_000, kind: 'lead', text: 'Ada leads the race', playerId: 'p1', rank: 1, previousRank: null, passed: [] }];
+  doc.spotlight = {
+    current: { key: 'c1/s0', instanceId: 'c1', itemId: 's0', startedAt: 6_000, endsAt: 66_000, total: 3 },
+    seen: { 'c1/s0': 4 },
+    round: ['c1/s0'],
+  };
   doc.seq = 42;
-  doc.players.push({ id: 'p1', gameId: doc.id, displayName: 'Ada', sessionTokenHash: 'hash', joinedAt: 2_000, removedAt: null, reclaimable: false });
+  doc.players.push({ id: 'p1', gameId: doc.id, displayName: 'Ada', sessionTokenHash: 'hash', joinedAt: 2_000, removedAt: null, reclaimable: false, avatar: 'media://selfie1' });
   doc.instances.push({
     id: 'c1',
     gameId: doc.id,
@@ -131,6 +136,8 @@ describe('SqliteRepository migration', () => {
     const raw = new DatabaseSync(path);
     raw.exec(`ALTER TABLE games DROP COLUMN standings;
       ALTER TABLE games DROP COLUMN standings_feed;
+      ALTER TABLE games DROP COLUMN spotlight;
+      ALTER TABLE players DROP COLUMN avatar;
       ALTER TABLE games DROP COLUMN results_revealed;
       ALTER TABLE challenge_instances DROP COLUMN title;
       ALTER TABLE challenge_instances DROP COLUMN category;
@@ -165,7 +172,7 @@ describe('SqliteRepository migration', () => {
     repo.saveGame(sampleGame());
     repo.close();
     const raw = new DatabaseSync(path);
-    raw.exec(`ALTER TABLE games DROP COLUMN standings; ALTER TABLE games DROP COLUMN standings_feed;
+    raw.exec(`ALTER TABLE games DROP COLUMN standings; ALTER TABLE games DROP COLUMN standings_feed; ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar;
       ALTER TABLE challenge_instances DROP COLUMN category; PRAGMA user_version = 3;`);
     raw.close();
 
@@ -175,6 +182,50 @@ describe('SqliteRepository migration', () => {
     expect(game!.instances[0]).toMatchObject({ title: 'Guess the year', category: '', allowReplay: true }); // v3 data kept
     upgraded.close();
     expect(readdirSync(dir).some((f) => f.startsWith('platform.sqlite.v3-backup-'))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('upgrades a schema v6 database in place: players get no picture', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { DatabaseSync } = await import('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'challenge-migrate-v6-'));
+    const path = join(dir, 'platform.sqlite');
+    const repo = new SqliteRepository(path);
+    repo.saveGame(sampleGame());
+    repo.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(`ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 6;`);
+    raw.close();
+    const upgraded = new SqliteRepository(path);
+    const [game] = upgraded.loadGames();
+    expect(game!.players[0]).toMatchObject({ displayName: 'Ada', avatar: null });
+    expect(game!.spotlight.current).toMatchObject({ itemId: 's0' }); // v6 data kept
+    upgraded.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('upgrades a schema v5 database in place: no spotlight yet', async () => {
+    const { mkdtempSync, readdirSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { DatabaseSync } = await import('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'challenge-migrate-v5-'));
+    const path = join(dir, 'platform.sqlite');
+    const repo = new SqliteRepository(path);
+    repo.saveGame(sampleGame());
+    repo.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(`ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 5;`);
+    raw.close();
+
+    const upgraded = new SqliteRepository(path);
+    const [game] = upgraded.loadGames();
+    expect(game!.instances[0]).toMatchObject({ category: 'Intelligence' }); // v5 data kept
+    expect(game!.spotlight).toEqual({ current: null, seen: {}, round: [] });
+    upgraded.close();
+    expect(readdirSync(dir).some((f) => f.startsWith('platform.sqlite.v5-backup-'))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -189,7 +240,7 @@ describe('SqliteRepository migration', () => {
     repo.saveGame(sampleGame());
     repo.close();
     const raw = new DatabaseSync(path);
-    raw.exec(`ALTER TABLE challenge_instances DROP COLUMN category; PRAGMA user_version = 4;`);
+    raw.exec(`ALTER TABLE challenge_instances DROP COLUMN category; ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 4;`);
     raw.close();
 
     const upgraded = new SqliteRepository(path);

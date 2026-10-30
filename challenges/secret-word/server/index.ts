@@ -128,7 +128,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const mine = wordsOf(state, player.id);
     const total = wordsPerPlayer(state.config);
     // The tile's note already counts the words that worked.
-    if (mine.history.length >= total) return { ok: false, reason: 'All your words are done' };
+    if (mine.history.length >= total) return { ok: false, reason: 'All your words are done', finished: true };
     return { ok: true, hint: `Get word ${mine.history.length + 1} of ${total}` };
   },
 

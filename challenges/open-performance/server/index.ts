@@ -57,7 +57,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onAttemptStart(state, player, ctx) {
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     // A replay starts with an empty entry.
     const { [player.id]: _previous, ...entries } = state.entries;
     return { ...state, entries };
@@ -122,7 +122,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const c = state.config;
     const children: UINode[] = [ui.text(c.prompt)];
     if (c.instructions) children.push(ui.text(c.instructions, { tone: 'muted' }));
-    children.push(ui.caption(`You get ${c.timeLimit} seconds to type a short entry, then perform it live. A judge decides how many points it earns.`));
+    children.push(ui.caption(`${c.timeLimit > 0 ? `You get ${c.timeLimit} seconds to type` : 'Type'} a short entry, then perform it live. A judge decides how many points it earns.`));
     return ui.stack(children, { gap: 'sm' });
   },
 

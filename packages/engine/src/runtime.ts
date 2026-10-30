@@ -30,16 +30,20 @@ import type {
   ScoreAward,
   ScoredSubmissionSummary,
   ScoreLedgerEntry,
+  SpotlightChoice,
+  SpotlightItem,
+  SpotlightView,
   StartCheck,
   Submission,
   TimerInfo,
   UINode,
 } from '@challenge/contract';
-import { DEFAULT_SETTINGS, SETUP_FORMAT, SETUP_VERSION, ui } from '@challenge/contract';
+import { DEFAULT_SETTINGS, SETUP_FORMAT, SETUP_VERSION, playerColor, playerIcon, ui } from '@challenge/contract';
 import { EngineError, invalidState, notFound, validationError } from './errors.ts';
 import { createSeededRng, generateGameCode, hashToken, newId, newToken, randomSeed } from './ids.ts';
 import { computeLeaderboard } from './leaderboard.ts';
 import { STANDINGS_FEED_LIMIT, diffStandings } from './standings.ts';
+import { SPOTLIGHT_IDLE_SECONDS, SPOTLIGHT_SECONDS, emptySpotlight, pickSpotlight } from './spotlight.ts';
 import type {
   PersistedAssignment,
   PersistedAttempt,
@@ -107,6 +111,7 @@ const REVERSAL = /^[a-z-]+-reversal:(.+)$/;
 
 const timerKey = (instanceId: string, playerId: string | null, tag: string) => `${instanceId}|${playerId ?? ''}|${tag}`;
 const assignmentKey = (assignmentId: string) => `assignment|${assignmentId}`;
+const SPOTLIGHT_TIMER = 'spotlight';
 
 /**
  * One running game: a board of challenge instances that players attempt at their own
@@ -140,6 +145,7 @@ export class GameRuntime {
     this.doc.resultsRevealed ??= false;
     this.doc.standings ??= null;
     this.doc.standingsFeed ??= [];
+    this.doc.spotlight ??= emptySpotlight();
     for (const inst of this.doc.instances) {
       inst.title ??= '';
       inst.category ??= '';
@@ -179,6 +185,7 @@ export class GameRuntime {
       resultsRevealed: false,
       standings: null,
       standingsFeed: [],
+      spotlight: emptySpotlight(),
       seq: 0,
       players: [],
       instances: [],
@@ -208,6 +215,7 @@ export class GameRuntime {
         this.armAssignmentTimer(a, Math.max(0, a.deadlineAt - this.deps.clock()));
       }
     }
+    this.updateSpotlight();
     this.persist();
   }
 
@@ -487,12 +495,11 @@ export class GameRuntime {
     const idx = this.doc.instances.findIndex((i) => i.id === instanceId);
     if (idx < 0) throw notFound('Challenge not found');
     const inst = this.doc.instances[idx]!;
-    if (this.doc.attempts.some((a) => a.challengeInstanceId === inst.id)) {
-      throw invalidState('Players have already attempted this challenge; reset it before removing');
-    }
-    this.cancelInstanceTimers(inst);
+    // Anything already played goes the way of a reset: points reversed, attempts dropped.
+    this.wipeInstance(inst);
     this.doc.instances.splice(idx, 1);
     this.renumber();
+    this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
     this.commit();
   }
 
@@ -735,6 +742,20 @@ export class GameRuntime {
    * Live action (e.g. a batch of taps) for a module's `onAction`: not a submission, so
    * nothing is stored or evaluated per action. Snapshots are throttled (ACTION_COMMIT_MS).
    */
+  /**
+   * A player's own picture: a `media://` reference to their uploaded selfie (the server checks
+   * the file), or null to go back to their icon. Shown on the big screen next to their name.
+   */
+  setAvatar(playerId: string, ref: string | null): PlayerResult {
+    const player = this.getPlayer(playerId);
+    if (!player || player.removedAt !== null) return { ok: false, reason: 'You are no longer in this game' };
+    if (this.doc.status === 'FINISHED') return { ok: false, reason: 'This game is over' };
+    if (ref !== null && !/^media:\/\/[A-Za-z0-9_-]+$/.test(ref)) return { ok: false, reason: 'That picture cannot be used' };
+    player.avatar = ref;
+    this.commit();
+    return { ok: true };
+  }
+
   moduleAction(playerId: string, instanceId: string, payload: unknown): PlayerResult {
     const player = this.getPlayer(playerId);
     if (!player || player.removedAt !== null) return { ok: false, reason: 'You are no longer in this game' };
@@ -1234,6 +1255,10 @@ export class GameRuntime {
         return this.reopenGame();
       case 'publish-standings':
         return this.publishStandings();
+      case 'show-spotlight':
+        return this.showSpotlight(action.instanceId, action.itemId, action.hold === true);
+      case 'release-spotlight':
+        return this.releaseSpotlight();
       case 'reveal-results':
         return this.setResultsRevealed(true);
       case 'hide-results':
@@ -1260,10 +1285,19 @@ export class GameRuntime {
         return this.reopenChallenge(action.instanceId);
       case 'reset-challenge':
         return this.resetChallenge(action.instanceId);
+      case 'reopen-for-player':
+        return this.reopenForPlayer(action.instanceId, action.playerId);
       case 'assign-challenge':
         return this.assignChallenge(action.instanceId, action.playerIds);
       case 'remove-player':
         return this.removePlayer(action.playerId);
+      case 'clear-avatar': {
+        const player = this.getPlayer(action.playerId);
+        if (!player) throw notFound('Player not found');
+        player.avatar = null;
+        this.commit();
+        return { ok: true };
+      }
       case 'free-player':
         return this.freePlayer(action.playerId);
       case 'decide':
@@ -1340,6 +1374,7 @@ export class GameRuntime {
     for (const inst of this.doc.instances) {
       if (inst.phase === 'PENDING' && inst.availability !== 'host-unlocked') this.openInstance(inst);
     }
+    this.updateSpotlight();
     this.queueEvent('GAME_STARTED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1423,6 +1458,18 @@ export class GameRuntime {
   /** Wipe everything about an instance (points reversed) so it can be played again. */
   private resetChallenge(instanceId: string): HostActionResult {
     const inst = this.getInstance(instanceId);
+    this.wipeInstance(inst);
+    inst.openedAt = null;
+    inst.closedAt = null;
+    inst.phase = 'PENDING';
+    if (this.doc.status === 'IN_PROGRESS' && inst.availability !== 'host-unlocked') this.openInstance(inst);
+    this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
+    this.commit();
+    return { ok: true };
+  }
+
+  /** Cancel an instance's timers and judging, reverse its points, drop its attempts and state. */
+  private wipeInstance(inst: PersistedInstance): void {
     this.cancelInstanceTimers(inst, true);
     for (const a of this.doc.assignments) {
       if (a.challengeInstanceId === inst.id && a.status === 'pending') {
@@ -1444,16 +1491,9 @@ export class GameRuntime {
     inst.moduleState = null;
     inst.evaluation = null;
     inst.results = null;
-    inst.openedAt = null;
-    inst.closedAt = null;
     inst.timers = [];
     inst.error = null;
-    inst.phase = 'PENDING';
     this.rngs.delete(inst.id);
-    if (this.doc.status === 'IN_PROGRESS' && inst.availability !== 'host-unlocked') this.openInstance(inst);
-    this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
-    this.commit();
-    return { ok: true };
   }
 
   private assignChallenge(instanceId: string, playerIds: string[]): HostActionResult {
@@ -1512,6 +1552,7 @@ export class GameRuntime {
         this.armAssignmentTimer(a, a.deadlineAt - now);
       }
     }
+    this.updateSpotlight();
     this.queueEvent('GAME_RESUMED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1537,6 +1578,7 @@ export class GameRuntime {
     }
     this.doc.status = 'GAME_RESULTS';
     this.doc.finishedAt = this.deps.clock();
+    this.updateSpotlight();
     this.queueEvent('GAME_FINISHED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1558,6 +1600,7 @@ export class GameRuntime {
       this.doc.resultsRevealed = false;
       this.queueEvent('RESULTS_HIDDEN', 'all', {});
     }
+    this.updateSpotlight();
     this.queueEvent('GAME_REOPENED', 'all', {});
     this.commit();
     return { ok: true, message: wasClosed ? `Game continued — join code ${this.doc.code}. Reopen the challenges players should play.` : 'Game continued. Reopen the challenges players should play.' };
@@ -1862,7 +1905,12 @@ export class GameRuntime {
   }
 
   private playerRef(p: PersistedPlayer): PlayerRef {
-    return { id: p.id, displayName: p.displayName, connected: this.isPlayerConnected(p.id) };
+    return { id: p.id, displayName: p.displayName, connected: this.isPlayerConnected(p.id), color: this.colorOf(p) };
+  }
+
+  /** Join order decides the colour; players who left keep theirs, so nobody's colour changes. */
+  private colorOf(p: PersistedPlayer): string {
+    return playerColor(Math.max(0, this.doc.players.indexOf(p)));
   }
 
   /** Run a module function, converting exceptions into a host-visible error (FR-52). */
@@ -1933,6 +1981,161 @@ export class GameRuntime {
       // The big screen shows what the host last published, whatever is revealed on phones.
       standings: player ? null : this.doc.standings,
       standingsFeed: player ? [] : [...this.doc.standingsFeed].reverse(),
+      spotlight: player ? null : this.spotlightView(),
+      spotlightChoices: isHost ? this.spotlightChoices() : [],
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Big-screen spotlight (module `spotlight` items, one a minute)
+  // ---------------------------------------------------------------------------
+
+  /** Every item the open instances offer the spotlight right now. */
+  private spotlightItems(): { key: string; inst: PersistedInstance; item: SpotlightItem }[] {
+    const out: { key: string; inst: PersistedInstance; item: SpotlightItem }[] = [];
+    for (const inst of this.doc.instances) {
+      if (inst.phase !== 'ACTIVE' || inst.moduleState === null) continue;
+      const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+      if (!loaded?.module.spotlight) continue;
+      const items = this.safeView(inst, () => loaded.module.spotlight!(inst.moduleState, this.ctxFor(inst)));
+      for (const item of Array.isArray(items) ? items : []) {
+        if (item && typeof item.id === 'string') out.push({ key: `${inst.id}/${item.id}`, inst, item });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Keep the spotlight going while the game runs: move on when the item's minute is up or it
+   * went away (see `pickSpotlight`), and arm the timer for the next look. Returns whether
+   * what is on screen changed (callers commit).
+   */
+  private updateSpotlight(): boolean {
+    const s = this.doc.spotlight;
+    this.clearHandle(SPOTLIGHT_TIMER);
+    if (this.doc.status !== 'IN_PROGRESS') {
+      const changed = s.current !== null;
+      s.current = null;
+      return changed;
+    }
+    if (this.doc.paused) {
+      this.armSpotlight(SPOTLIGHT_IDLE_SECONDS * 1000);
+      return false;
+    }
+    const now = this.deps.clock();
+    const items = this.spotlightItems();
+    const live = s.current ? items.find((i) => i.key === s.current!.key) : undefined;
+    // Held by the host: it stays until released (or its challenge closes).
+    if (s.current?.held && live) return false;
+    if (s.current && live && now < s.current.endsAt) {
+      this.armSpotlight(s.current.endsAt - now);
+      return false;
+    }
+    // Answers given while it was on screen do not count as new next time.
+    if (s.current && live) s.seen[s.current.key] = live.item.activity;
+    const next = pickSpotlight(
+      items.map((i) => ({ key: i.key, activity: i.item.activity })),
+      s,
+      live ? s.current!.key : null,
+      this.deps.random ?? Math.random,
+    );
+    if (!next) {
+      this.armSpotlight(SPOTLIGHT_IDLE_SECONDS * 1000);
+      const changed = s.current !== null;
+      s.current = null;
+      return changed;
+    }
+    const chosen = items.find((i) => i.key === next.key)!;
+    s.round = next.round;
+    s.seen[next.key] = chosen.item.activity;
+    s.current = { key: next.key, instanceId: chosen.inst.id, itemId: chosen.item.id, startedAt: now, endsAt: now + SPOTLIGHT_SECONDS * 1000, total: items.length };
+    this.armSpotlight(SPOTLIGHT_SECONDS * 1000);
+    return true;
+  }
+
+  /** The host puts one item on the big screen now; it counts as that item's turn. */
+  private showSpotlight(instanceId: string, itemId: string, hold: boolean): HostActionResult {
+    this.assertInProgress();
+    const s = this.doc.spotlight;
+    const items = this.spotlightItems();
+    const chosen = items.find((i) => i.inst.id === instanceId && i.item.id === itemId);
+    if (!chosen) throw notFound('That item is not available for the big screen (is its challenge open?)');
+    const previous = s.current ? items.find((i) => i.key === s.current!.key) : undefined;
+    if (previous) s.seen[previous.key] = previous.item.activity;
+    const now = this.deps.clock();
+    s.seen[chosen.key] = chosen.item.activity;
+    s.round = [...s.round.filter((k) => k !== chosen.key && items.some((i) => i.key === k)), chosen.key];
+    s.current = {
+      key: chosen.key,
+      instanceId,
+      itemId,
+      startedAt: now,
+      endsAt: now + SPOTLIGHT_SECONDS * 1000,
+      total: items.length,
+      held: hold,
+    };
+    this.clearHandle(SPOTLIGHT_TIMER);
+    if (!hold) this.armSpotlight(SPOTLIGHT_SECONDS * 1000);
+    this.commit();
+    return { ok: true };
+  }
+
+  /** Back to rotating after a held item: the next one comes up right away. */
+  private releaseSpotlight(): HostActionResult {
+    this.assertInProgress();
+    const current = this.doc.spotlight.current;
+    if (current?.held) {
+      current.held = false;
+      current.endsAt = this.deps.clock();
+      this.updateSpotlight();
+      this.commit();
+    }
+    return { ok: true };
+  }
+
+  /** Host only: everything that can be put in the spotlight, in board order. */
+  private spotlightChoices(): SpotlightChoice[] {
+    return this.spotlightItems().map(({ inst, item }) => ({
+      instanceId: inst.id,
+      title: this.titleOf(inst),
+      itemId: item.id,
+      label: typeof item.label === 'string' ? item.label : item.id,
+      activity: item.activity,
+    }));
+  }
+
+  private armSpotlight(ms: number): void {
+    this.clearHandle(SPOTLIGHT_TIMER);
+    this.timerHandles.set(
+      SPOTLIGHT_TIMER,
+      this.deps.setTimer(() => {
+        if (this.disposed) return;
+        this.timerHandles.delete(SPOTLIGHT_TIMER);
+        if (this.updateSpotlight()) this.commit();
+      }, Math.max(0, ms)),
+    );
+  }
+
+  /** The item on screen, drawn from the module's current state (answers keep coming in). */
+  private spotlightView(): SpotlightView | null {
+    const c = this.doc.spotlight.current;
+    if (!c || this.doc.status !== 'IN_PROGRESS') return null;
+    const inst = this.doc.instances.find((i) => i.id === c.instanceId);
+    const loaded = inst ? this.deps.registry.get(inst.moduleId, inst.moduleVersion) : undefined;
+    if (!inst || inst.phase !== 'ACTIVE' || inst.moduleState === null || !loaded?.module.spotlight) return null;
+    const items = this.safeView(inst, () => loaded.module.spotlight!(inst.moduleState, this.ctxFor(inst)));
+    const item = Array.isArray(items) ? items.find((i) => i?.id === c.itemId) : undefined;
+    if (!item) return null;
+    return {
+      instanceId: inst.id,
+      title: this.titleOf(inst),
+      category: inst.category,
+      itemId: item.id,
+      ui: item.ui,
+      startedAt: c.startedAt,
+      endsAt: c.endsAt,
+      total: c.total,
+      held: c.held === true,
     };
   }
 
@@ -1953,7 +2156,16 @@ export class GameRuntime {
   }
 
   private playerPublic(p: PersistedPlayer): PlayerPublic {
-    return { id: p.id, displayName: p.displayName, connected: this.isPlayerConnected(p.id), joinedAt: p.joinedAt };
+    const index = Math.max(0, this.doc.players.indexOf(p));
+    return {
+      id: p.id,
+      displayName: p.displayName,
+      connected: this.isPlayerConnected(p.id),
+      joinedAt: p.joinedAt,
+      color: this.colorOf(p),
+      icon: playerIcon(index),
+      avatar: p.avatar ?? null,
+    };
   }
 
   private moduleName(inst: PersistedInstance): string {
@@ -2008,8 +2220,36 @@ export class GameRuntime {
       configuration: includeConfig ? inst.configuration : undefined,
       error: includeConfig ? inst.error : undefined,
       summary: includeConfig ? firstString : undefined,
+      closedFor: includeConfig ? this.closedFor(inst) : undefined,
       displayPanel: withPanel ? this.displayPanelOf(inst) : undefined,
     };
+  }
+
+  /** Players the module closed this (open) instance for; the host may reopen it for them. */
+  private closedFor(inst: PersistedInstance): string[] {
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.closedFor || !loaded.module.reopenFor || inst.moduleState === null || inst.phase !== 'ACTIVE') return [];
+    const ids = this.safeView(inst, () => loaded.module.closedFor!(inst.moduleState, this.ctxFor(inst))) ?? [];
+    const present = new Set(this.doc.players.filter((p) => p.removedAt === null).map((p) => p.id));
+    return ids.filter((id) => present.has(id));
+  }
+
+  private reopenForPlayer(instanceId: string, playerId: string): HostActionResult {
+    const inst = this.getInstance(instanceId);
+    const player = this.getPlayer(playerId);
+    if (!player || player.removedAt !== null) throw notFound('Player not found');
+    if (!this.closedFor(inst).includes(player.id)) throw invalidState(`${player.displayName} can already play this challenge`);
+    const loaded = this.moduleFor(inst);
+    const ok = this.callModule(inst, () => {
+      inst.moduleState = loaded.module.reopenFor!(inst.moduleState, this.playerRef(player), this.ctxFor(inst));
+    });
+    if (!ok) {
+      this.commit();
+      throw invalidState('The challenge could not reopen for this player');
+    }
+    // Not in the (public) activity feed: why it was closed for them is their business.
+    this.commit();
+    return { ok: true };
   }
 
   /** The module's live big-screen panel (null when it has none or has not started). */
@@ -2030,16 +2270,21 @@ export class GameRuntime {
     const ref = this.playerRef(player);
 
     const live = attempt?.status === 'in_progress';
+    const note = loaded?.module.playerNote && ctx && inst.moduleState !== null ? (this.safeView(inst, () => loaded.module.playerNote!(inst.moduleState, ref, ctx)) ?? null) : null;
     // The module's own gate (e.g. turn-taking) applies only where the engine would allow a start.
     const check = canStart && !live && loaded ? this.moduleStartCheck(inst, player) : null;
     const blocked = check !== null && !check.ok;
+    const finished = check !== null && !check.ok && check.finished === true;
+    // "Your turn": asked while the player may start, and while their attempt runs.
+    const urgentCheck = live && inst.phase === 'ACTIVE' && loaded ? this.moduleStartCheck(inst, player) : check;
+    const urgent = urgentCheck !== null && urgentCheck.ok && urgentCheck.urgent === true;
     const repeat = manifest?.attempts === 'repeat';
 
     // With replays the tile reflects the best outcome so far, not just the latest attempt.
     // Repeat modules are about the next contribution: playable or waiting while they are open.
     let status: AttemptStatus;
     if (live) status = 'in_progress';
-    else if (repeat && canStart) status = blocked ? 'waiting' : 'available';
+    else if (repeat && canStart && !finished) status = blocked ? 'waiting' : 'available';
     else if (attempts.some((a) => a.status === 'scored')) status = 'scored';
     else if (attempts.some((a) => a.status === 'locked' && this.submissionOf(a))) status = 'submitted';
     else if (attempt) status = 'missed';
@@ -2096,10 +2341,9 @@ export class GameRuntime {
       attempts: attempts.length,
       canReplay,
       repeat,
-      note:
-        loaded?.module.playerNote && ctx && inst.moduleState !== null
-          ? (this.safeView(inst, () => loaded.module.playerNote!(inst.moduleState, ref, ctx)) ?? null)
-          : null,
+      note: typeof note === 'string' ? note : (note?.text ?? null),
+      noteTone: typeof note === 'object' && note !== null ? (note.tone ?? null) : null,
+      urgent,
       intro,
       view,
       canSubmit,
@@ -2337,6 +2581,9 @@ export class GameRuntime {
 
   private commit(fromActions = false): void {
     if (this.disposed) return;
+    // The spotlight moves on at once when its challenge was closed, hidden or reset.
+    const shown = this.doc.spotlight.current;
+    if (shown && this.doc.instances.find((i) => i.id === shown.instanceId)?.phase !== 'ACTIVE') this.updateSpotlight();
     const at = new Date(this.deps.clock()).toISOString();
     const events = this.queue;
     this.queue = [];

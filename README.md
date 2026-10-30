@@ -52,7 +52,7 @@ ended) creates a clean copy (new code, no players or scores), e.g. to go from a 
 to the real party. The old game is kept; *Continue this game* brings an ended or closed
 game back to in progress with everyone's points.
 
-To try everything quickly, seed a demo game containing all fifteen modules while `npm run dev`
+To try everything quickly, seed a demo game containing all twenty-one modules while `npm run dev`
 is running. It prints the host, display and join URLs:
 
 ```bash
@@ -98,7 +98,7 @@ docs/                                    Architecture and module-authoring docum
 | Module | Category | Results | Evaluation | Exercises |
 |---|---|---|---|---|
 | `multiple-choice` | knowledge | immediate | automatic | schema config, fixed scoring + speed bonus |
-| `numeric-answer` | knowledge | immediate | automatic | exact-match evaluation with tolerance |
+| `numeric-answer` | knowledge | immediate | automatic | exact-match evaluation with tolerance; superseded by `multi-answer` (`supersededBy`: kept for existing games, no longer in the library) |
 | `closest-number` | knowledge | on close | automatic | aggregate ranked scoring (reference module) |
 | `timed-reaction` | skill | immediate | automatic | server-side per-player timing (SR-5) |
 | `stop-the-clock` | skill | immediate | automatic | phone-timed stopwatch (`ui.stopwatch`), checked against the server's own measurement |
@@ -108,12 +108,18 @@ docs/                                    Architecture and module-authoring docum
 | `photo-hunt` | chaos | immediate | peer (host, hybrid) | evidence upload from the phone camera |
 | `open-performance` | chaos | immediate | host (hybrid, peer) | host queue with points |
 | `prediction` | social | on close | automatic + host resolution | outcome resolved later by the host |
-| `multi-answer` | knowledge | immediate | automatic | several answers, a share of the points each, the remainder only for a full set |
+| `multi-answer` ("Answer") | knowledge | immediate | automatic | one answer or several (a share of the points each, the remainder only for a full set); lenient text matching, numbers with a tolerance and unit in a number box |
 | `blob-war` | chaos | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle) |
 | `group-message` | social | immediate | automatic | one player at a time (`canStart`), repeated attempts whose points add up (`attempts: "repeat"`) |
+| `sliding-scales` | social | on close | automatic | statements on a slider with min/max/interval/unit; answers are live actions (`ui.liveAnswer`), changeable until closed; big-screen spotlight with a histogram (`spotlight`, `ui.distribution`) |
+| `rivalries` | social | on close | automatic | two sides of a slider, optional meaning of the middle |
+| `binaries` | social | on close | automatic | yes/no statements (live answer buttons), two bars on the big screen |
+| `likelihoods` | social | on close | automatic | how likely, 0–100%, histogram with the average |
+| `agree-to-disagree` | social | on close | automatic | seven levels from fully agree to fully disagree |
+| `report-score` | other | immediate | automatic | the number a player fills in is their points (decided outside the app), up to a maximum; above it costs a penalty (not announced beforehand) and closes it for that player until the host reopens it (repeat attempts, `canStart` → `finished`, `playerNote` tone, `closedFor` / `reopenFor`) |
 | `secret-word` | social | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400 (or the host's own), left open while the player waits for the right moment |
 
-All fifteen run on the same engine without engine changes (spec §21.3). Add your own by
+All twenty-one run on the same engine without engine changes (spec §21.3). Add your own by
 creating a folder under `challenges/` — see the authoring guide.
 
 ## Scripts

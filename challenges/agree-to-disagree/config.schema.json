@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "required": ["statements"],
+  "properties": {
+    "statements": {
+      "type": "array",
+      "title": "Statements",
+      "description": "Each is answered on a slider from fully agree to fully disagree, in seven steps.",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "title": "Statement", "minLength": 1, "maxLength": 200 }
+        }
+      }
+    },
+    "pointsPerAnswer": {
+      "type": "integer",
+      "title": "Points per answered statement",
+      "description": "Awarded when the challenge closes. 0 = just for fun.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
+    }
+  }
+}

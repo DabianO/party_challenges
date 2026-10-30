@@ -1,14 +1,15 @@
 /**
- * Multiple Answers (contract v2).
+ * Answer (contract v2; module id `multi-answer`, once "Multiple Answers").
  *
- * One question, several answer boxes. Points are split into an equal whole-number share
- * per answer, floor(points / answers); the remainder is a bonus only for a fully correct
- * set, so a full set always scores exactly `points` (10 points, 3 answers: 3 + 3 + 3,
- * and 10 when all three are right).
+ * One question with one answer box, or several. Points are split into an equal whole-number
+ * share per answer, floor(points / answers); the remainder is a bonus only for a fully
+ * correct set, so a full set always scores exactly `points` (10 points, 3 answers: 3 + 3 + 3,
+ * and 10 when all three are right). A single answer simply scores `points`.
  *
  * Answers are compared leniently: case, accents, punctuation and extra spaces are ignored,
- * numbers compare by value, and hosts can list alternative spellings. With `anyOrder` the
- * boxes are interchangeable (e.g. "name the three primary colours").
+ * and hosts can list alternative spellings. Numbers compare by value, within the answer's
+ * tolerance, and get a number box with the answer's unit (this covers Numeric Answer). With
+ * `anyOrder` the boxes are interchangeable (e.g. "name the three primary colours").
  */
 import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
@@ -18,6 +19,9 @@ interface AnswerSpec {
   label?: string;
   answer: string;
   alternatives?: string;
+  /** Numbers within plus/minus this much count as right. */
+  tolerance?: number;
+  unit?: string;
 }
 
 interface Config {
@@ -26,14 +30,15 @@ interface Config {
   anyOrder: boolean;
   timeLimit: number;
   points: number;
+  media?: string;
 }
 
 interface State {
   config: Config;
 }
 
-/** Field `a<i>` holds the player's answer for box i. */
-type Input = Record<string, string>;
+/** Field `a<i>` holds the player's answer for box i (text, or a number from a number box). */
+type Input = Record<string, string | number>;
 
 /** One evaluation per submission (results: immediate). */
 interface Evaluation {
@@ -65,18 +70,25 @@ export function normalise(s: string): string {
 }
 
 const NUMBER = /^-?\d+([.,]\d+)?$/;
+const toNumber = (s: string) => Number(s.replace(',', '.'));
+
+function isNumber(s: string): boolean {
+  return NUMBER.test(normalise(s));
+}
 
 function accepted(spec: AnswerSpec): string[] {
   return [spec.answer, ...(spec.alternatives ?? '').split(',')].map(normalise).filter(Boolean);
 }
 
-/** Does `given` match this answer (or one of its alternatives)? Numbers compare by value. */
+/** Does `given` match this answer (or one of its alternatives)? Numbers compare by value, within the tolerance. */
 export function matches(spec: AnswerSpec, given: string): boolean {
   const g = normalise(given);
   if (!g) return false;
+  const tolerance = Math.max(0, spec.tolerance ?? 0);
   return accepted(spec).some((a) => {
     if (a === g) return true;
-    if (NUMBER.test(a) && NUMBER.test(g)) return Number(a.replace(',', '.')) === Number(g.replace(',', '.'));
+    // A small epsilon guards against floating point noise on the tolerance boundary.
+    if (NUMBER.test(a) && NUMBER.test(g)) return Math.abs(toNumber(a) - toNumber(g)) <= tolerance + 1e-9;
     return false;
   });
 }
@@ -99,6 +111,11 @@ export function scoreFor(points: number, answers: number, correctCount: number):
   return correctCount === answers ? points : correctCount * share;
 }
 
+/** Box i takes a number when its answer is one (in any order: when every answer is one). */
+export function numericBox(config: Config, i: number): boolean {
+  return config.anyOrder ? config.answers.every((a) => isNumber(a.answer)) : isNumber(config.answers[i]?.answer ?? '');
+}
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
@@ -107,8 +124,20 @@ function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
 }
 
+const single = (config: Config) => config.answers.length === 1;
+
 function labelOf(config: Config, i: number): string {
-  return (!config.anyOrder && config.answers[i]?.label) || `Answer ${i + 1}`;
+  return (!config.anyOrder && config.answers[i]?.label) || (single(config) ? 'Your answer' : `Answer ${i + 1}`);
+}
+
+function withUnit(text: string, unit?: string): string {
+  return unit ? `${text} ${unit}` : text;
+}
+
+/** The right answer as players see it in the results, e.g. "88 keys (± 2)". */
+export function answerText(spec: AnswerSpec): string {
+  const tolerance = spec.tolerance ?? 0;
+  return `${withUnit(spec.answer, spec.unit)}${tolerance > 0 && isNumber(spec.answer) ? ` (± ${withUnit(String(tolerance), spec.unit)})` : ''}`;
 }
 
 export default defineModule<Config, State, Input, Evaluation>({
@@ -120,16 +149,21 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onAttemptStart(state, player, ctx) {
-    ctx.schedule('lock', state.config.timeLimit, player.id);
+    if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     return state;
   },
 
   validateInput(state, _player, input) {
-    if (!input || typeof input !== 'object') return { ok: false, reason: 'Fill in your answers' };
+    const several = !single(state.config);
+    if (!input || typeof input !== 'object') return { ok: false, reason: several ? 'Fill in your answers' : 'Fill in your answer' };
     const values = state.config.answers.map((_, i) => (input as Record<string, unknown>)[field(i)]);
-    if (values.some((v) => v !== undefined && v !== null && typeof v !== 'string')) return { ok: false, reason: 'Answers must be text' };
-    if (values.some((v) => typeof v === 'string' && v.length > MAX_ANSWER_LENGTH)) return { ok: false, reason: 'One of your answers is too long' };
-    if (values.every((v) => typeof v !== 'string' || !v.trim())) return { ok: false, reason: 'Fill in at least one answer' };
+    if (values.some((v) => v !== undefined && v !== null && typeof v !== 'string' && !(typeof v === 'number' && Number.isFinite(v)))) {
+      return { ok: false, reason: 'Answers must be text or numbers' };
+    }
+    if (values.some((v) => typeof v === 'string' && v.length > MAX_ANSWER_LENGTH)) return { ok: false, reason: several ? 'One of your answers is too long' : 'Your answer is too long' };
+    if (values.every((v) => typeof v !== 'number' && (typeof v !== 'string' || !v.trim()))) {
+      return { ok: false, reason: several ? 'Fill in at least one answer' : 'Fill in your answer' };
+    }
     return { ok: true };
   },
 
@@ -157,7 +191,8 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   calculateScores(state, evaluation) {
     const n = state.config.answers.length;
-    return [{ playerId: evaluation.playerId, points: evaluation.points, reason: evaluation.allCorrect ? `All ${n} correct` : `${evaluation.correctCount} of ${n} correct` }];
+    const reason = n === 1 ? (evaluation.allCorrect ? 'Correct' : 'Wrong') : evaluation.allCorrect ? `All ${n} correct` : `${evaluation.correctCount} of ${n} correct`;
+    return [{ playerId: evaluation.playerId, points: evaluation.points, reason }];
   },
 
   getStatistics(state, evaluations) {
@@ -177,16 +212,26 @@ export default defineModule<Config, State, Input, Evaluation>({
     };
   },
 
-  guestView(state) {
+  guestView(state, _player, ctx) {
     const c = state.config;
     const share = Math.floor(c.points / c.answers.length);
-    const children: UINode[] = [ui.subtitle(c.question), ui.timer('lock')];
-    c.answers.forEach((_, i) => children.push(ui.textInput(field(i), { label: labelOf(c, i), maxLength: MAX_ANSWER_LENGTH })));
-    children.push(ui.submit('Lock in my answers', { size: 'lg' }));
+    const children: UINode[] = [ui.subtitle(c.question)];
+    if (c.media) children.push(ui.image(ctx.mediaUrl(c.media), { maxHeight: '30vh' }));
+    children.push(ui.timer('lock'));
+    c.answers.forEach((spec, i) => {
+      // In any order the boxes are interchangeable, so only a unit every answer shares is shown.
+      const unit = c.anyOrder ? (c.answers.every((a) => a.unit === c.answers[0]?.unit) ? c.answers[0]?.unit : undefined) : spec.unit;
+      children.push(
+        numericBox(c, i)
+          ? ui.numberInput(field(i), { label: labelOf(c, i), unit: unit || undefined, placeholder: '0' })
+          : ui.textInput(field(i), { label: unit ? `${labelOf(c, i)} (${unit})` : labelOf(c, i), maxLength: MAX_ANSWER_LENGTH }),
+      );
+    });
+    children.push(ui.submit(single(c) ? 'Lock in my answer' : 'Lock in my answers', { size: 'lg' }));
     return {
       ui: ui.stack(children, { gap: 'md' }),
       canSubmit: true,
-      status: `${share > 0 ? `${share} per correct answer · ` : ''}${c.points} for all ${c.answers.length}${c.anyOrder ? ' · any order' : ''}`,
+      status: single(c) ? plural(c.points, 'point') : `${share > 0 ? `${share} per correct answer · ` : ''}${c.points} for all ${c.answers.length}${c.anyOrder ? ' · any order' : ''}`,
     };
   },
 
@@ -194,10 +239,34 @@ export default defineModule<Config, State, Input, Evaluation>({
     const c = state.config;
     const total = evaluations.length;
     const perfect = evaluations.filter((e) => e.allCorrect).length;
+
+    if (single(c)) {
+      const spec = c.answers[0]!;
+      const right = ui.display(answerText(spec), { tone: 'success' });
+      const summary = ui.badge(total ? `${perfect} of ${total} right` : 'No answers yet', perfect > 0 ? 'success' : 'muted');
+      return {
+        ui: ui.stack([ui.caption(c.question, { align: 'center' }), right, ui.row([summary], { justify: 'center' })], { gap: 'md', align: 'stretch' }),
+        guestUi: (player) => {
+          const me = evaluations.find((e) => e.playerId === player.id);
+          const mine: UINode = !me
+            ? ui.badge('You did not answer', 'muted')
+            : ui.card(
+                [
+                  ui.title(me.allCorrect ? 'Correct!' : 'Not quite', { tone: me.allCorrect ? 'success' : 'danger' }),
+                  ui.text(`You answered ${me.given[0] ? withUnit(me.given[0], spec.unit) : '—'}`),
+                  ui.text(plural(me.points, 'point'), { tone: 'muted' }),
+                ],
+                me.allCorrect ? 'success' : 'danger',
+              );
+          return ui.stack([ui.caption(c.question), right, mine], { gap: 'md' });
+        },
+      };
+    }
+
     const answerList = ui.list(
       c.answers.map((spec, i) => {
         const right = evaluations.filter((e) => (c.anyOrder ? e.given.some((g) => matches(spec, g)) : e.correct[i])).length;
-        return { label: c.anyOrder ? spec.answer : `${labelOf(c, i)}: ${spec.answer}`, value: `${right}/${total}`, tone: 'success' as const };
+        return { label: c.anyOrder ? answerText(spec) : `${labelOf(c, i)}: ${answerText(spec)}`, value: `${right}/${total}`, tone: 'success' as const };
       }),
     );
     const summary = ui.badge(total ? `${plural(perfect, 'player')} got all ${c.answers.length}` : 'No answers yet', perfect > 0 ? 'success' : 'muted');
@@ -210,7 +279,7 @@ export default defineModule<Config, State, Input, Evaluation>({
         const rows = ui.list(
           c.answers.map((spec, i) => ({
             label: `${labelOf(c, i)}: ${me.given[i] || '—'}`,
-            value: me.correct[i] ? '✓' : c.anyOrder ? '✕' : `✕ ${spec.answer}`,
+            value: me.correct[i] ? '✓' : c.anyOrder ? '✕' : `✕ ${answerText(spec)}`,
             tone: me.correct[i] ? ('success' as const) : ('danger' as const),
           })),
         );
