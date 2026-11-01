@@ -43,6 +43,14 @@ The host can put a chosen item on screen now (`show-spotlight`, optionally `hold
 `release-spotlight`). During the game the display is always exactly one screen: the race,
 live panels and the spotlight share a grid of up to 2 × 2 (more rows of two beyond that).
 
+**Results presentation.** Once challenges are closed, the host can present what everyone
+made on the big screen, as slides from the modules' `presentation` (fill-in-the-blanks
+entries rolling through their sentence, selfies next to their emoji, the group message, the
+Blob War picture, every Hot Take on one slide). It takes the whole screen in any game state,
+also after the game is finished, and shows no points. The host steps through it (arrow keys,
+Page Up/Down) or lets it play: the runtime keeps the position in memory (`presentation.ts`
+moves through the running order) and times the steps; challenges that are reopened drop out.
+
 Availability per instance: `open` (everyone), `host-unlocked` (hidden until the host
 unlocks it), `assigned` (only the listed players see and play it).
 

@@ -3,7 +3,7 @@ import { EvaluationBadge, ResultsTimingBadge, evaluationLabel } from '../../comp
 import { formatDuration } from '../../lib/time';
 import { supportedModesOf } from './InstanceOptionsFields';
 
-const CATEGORY_ORDER = ['knowledge', 'skill', 'social', 'memory', 'chaos', 'other'];
+const CATEGORY_ORDER = ['knowledge', 'skill', 'social', 'memory', 'creativity', 'chaos', 'other'];
 
 function playersRange(p: { min: number; max: number | null }): string {
   if (p.max === null) return `${p.min}+ players`;

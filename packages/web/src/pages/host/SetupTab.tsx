@@ -57,7 +57,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
   };
 
   const openAdd = (m: ModuleInfo) => {
-    setOptions({ ...DEFAULT_OPTIONS, category: m.manifest.suggestedCategory ?? '' });
+    setOptions({ ...DEFAULT_OPTIONS, category: m.manifest.suggestedCategory ?? '', allowReplay: m.manifest.suggestedReplay === true && m.manifest.results === 'immediate' });
     setFormError(null);
     setPanel({ kind: 'add', module: m });
   };

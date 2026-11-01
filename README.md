@@ -52,7 +52,7 @@ ended) creates a clean copy (new code, no players or scores), e.g. to go from a 
 to the real party. The old game is kept; *Continue this game* brings an ended or closed
 game back to in progress with everyone's points.
 
-To try everything quickly, seed a demo game containing all twenty-one modules while `npm run dev`
+To try everything quickly, seed a demo game containing all twenty-five modules while `npm run dev`
 is running. It prints the host, display and join URLs:
 
 ```bash
@@ -65,6 +65,11 @@ Production-style run (serves the built web client from the game server on one po
 npm run build
 npm start
 ```
+
+Use this for the party itself. With `npm run dev`, Vite reloads a phone's page whenever its
+connection drops and comes back (stand-by, or opening the camera for a photo). The app copes
+(unsent answers and uploaded photos are kept for the tab), but the production run avoids
+those reloads altogether.
 
 ### Configuration (environment variables)
 
@@ -101,7 +106,9 @@ docs/                                    Architecture and module-authoring docum
 | `numeric-answer` | knowledge | immediate | automatic | exact-match evaluation with tolerance; superseded by `multi-answer` (`supersededBy`: kept for existing games, no longer in the library) |
 | `closest-number` | knowledge | on close | automatic | aggregate ranked scoring (reference module) |
 | `timed-reaction` | skill | immediate | automatic | server-side per-player timing (SR-5) |
-| `stop-the-clock` | skill | immediate | automatic | phone-timed stopwatch (`ui.stopwatch`), checked against the server's own measurement |
+| `stop-the-clock` | skill | immediate | automatic | phone-timed stopwatch (`ui.stopwatch`) with the time visible: milliseconds count; checked against the server's own measurement |
+| `time-estimation` | skill | immediate | automatic | the same stopwatch without any clock (`hideAfterSeconds: 0`): stop when you think e.g. 45 s have passed |
+| `color-match` | skill | immediate | automatic | the Stroop test: tap the colour of the letters; the player picks level 1–3 every try (colours, seconds per word and points per level, shown on the start buttons: `ui.quickRounds` `choices`); rounds played on the phone, a new deal every try, replays on by default (`suggestedReplay`) |
 | `image-memory` | memory | immediate | automatic | media, per-player reveal/hide phases |
 | `majority-vote` | social | on close | automatic | no correct answer, social scoring |
 | `caption-this` | social | immediate | peer (host, hybrid) | peer approval with text evidence (reference module) |
@@ -109,17 +116,19 @@ docs/                                    Architecture and module-authoring docum
 | `open-performance` | chaos | immediate | host (hybrid, peer) | host queue with points |
 | `prediction` | social | on close | automatic + host resolution | outcome resolved later by the host |
 | `multi-answer` ("Answer") | knowledge | immediate | automatic | one answer or several (a share of the points each, the remainder only for a full set); lenient text matching, numbers with a tolerance and unit in a number box |
-| `blob-war` | chaos | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle) |
-| `group-message` | social | immediate | automatic | one player at a time (`canStart`), repeated attempts whose points add up (`attempts: "repeat"`) |
+| `blob-war` | creativity | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle), the picture as a presentation slide |
+| `group-message` | creativity | immediate | automatic | one player at a time (`canStart`), strictly in turn whether or not their phone is awake (the turn moves on after its time), repeated attempts whose points add up (`attempts: "repeat"`), whose turn it is in the big screen's top bar (`displayBanner`), the message in readable parts as presentation slides |
+| `selfiemotion` | creativity | immediate | peer (automatic, host, hybrid) | a random emoji (evenly spread) to recreate in a selfie; presentation: four selfies a slide next to their emoji |
+| `fill-in-the-blanks` | creativity | immediate | automatic | sentences with blanks (`___`), points per completed sentence, players may stay anonymous (off by default); the latest sentence on the big screen while open, a new one a minute (`displayPanel`, own instance timer); presentation: everyone's entries rolling through the blanks (`ui.spool`) |
 | `sliding-scales` | social | on close | automatic | statements on a slider with min/max/interval/unit; answers are live actions (`ui.liveAnswer`), changeable until closed; big-screen spotlight with a histogram (`spotlight`, `ui.distribution`) |
-| `rivalries` | social | on close | automatic | two sides of a slider, optional meaning of the middle |
+| `rivalries` | social | on close | automatic | two sides of a slider, optional meaning of the middle; like every Hot Take, all statements on one presentation slide (`presentation`) |
 | `binaries` | social | on close | automatic | yes/no statements (live answer buttons), two bars on the big screen |
 | `likelihoods` | social | on close | automatic | how likely, 0–100%, histogram with the average |
 | `agree-to-disagree` | social | on close | automatic | seven levels from fully agree to fully disagree |
 | `report-score` | other | immediate | automatic | the number a player fills in is their points (decided outside the app), up to a maximum; above it costs a penalty (not announced beforehand) and closes it for that player until the host reopens it (repeat attempts, `canStart` → `finished`, `playerNote` tone, `closedFor` / `reopenFor`) |
-| `secret-word` | social | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400 (or the host's own), left open while the player waits for the right moment |
+| `secret-word` | creativity | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400, the host's own instead or added to it (with a chance for theirs to come next), left open while the player waits for the right moment |
 
-All twenty-one run on the same engine without engine changes (spec §21.3). Add your own by
+All twenty-five run on the same engine without engine changes (spec §21.3). Add your own by
 creating a folder under `challenges/` — see the authoring guide.
 
 ## Scripts

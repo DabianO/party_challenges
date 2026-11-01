@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "rounds": {
+      "type": "integer",
+      "title": "Words per try",
+      "minimum": 3,
+      "maximum": 50,
+      "default": 10
+    },
+    "levels": {
+      "type": "array",
+      "title": "Levels 1, 2 and 3",
+      "description": "Players pick a level every time they play and see these numbers on the buttons. Colours: red, blue, green and yellow, then purple and orange.",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "title": "level",
+        "required": ["colors", "secondsPerRound", "pointsPerCorrect"],
+        "properties": {
+          "colors": { "type": "integer", "title": "Colours", "minimum": 3, "maximum": 6 },
+          "secondsPerRound": { "type": "number", "title": "Seconds per word", "minimum": 0.3, "maximum": 10 },
+          "pointsPerCorrect": { "type": "integer", "title": "Points per correct tap", "minimum": 0, "maximum": 100 }
+        }
+      },
+      "default": [
+        { "colors": 4, "secondsPerRound": 1.5, "pointsPerCorrect": 1 },
+        { "colors": 5, "secondsPerRound": 1, "pointsPerCorrect": 2 },
+        { "colors": 6, "secondsPerRound": 0.75, "pointsPerCorrect": 3 }
+      ]
+    }
+  }
+}

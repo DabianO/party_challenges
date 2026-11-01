@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { HostAction } from '@challenge/contract';
+import type { HostAction, PresentationMove } from '@challenge/contract';
 import { ActivityFeed } from '../../components/ActivityFeed';
 import { Leaderboard } from '../../components/Leaderboard';
 import { ProgressChart } from '../../components/ProgressChart';
@@ -30,6 +30,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
 
   const running = game.status === 'IN_PROGRESS';
   const finished = game.status === 'GAME_RESULTS' || game.status === 'FINISHED';
+  const closedCount = challenges.filter((c) => c.phase === 'LOCKED' || c.phase === 'EVALUATING' || c.phase === 'RESULTS').length;
   const attention = attentionCount(ctx);
 
   return (
@@ -82,6 +83,17 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
                 ❙❙ Pause
               </button>
             ))}
+          {running && closedCount > 0 && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              title="Open every closed challenge again. Players who played keep their result; Hot Takes and Blob War carry on where they were and are scored again when you close them."
+              onClick={() => void act({ action: 'reopen-all-challenges' }, `Open all ${closedCount} closed challenges again?`)}
+            >
+              ↺ Reopen all closed challenges ({closedCount})
+            </button>
+          )}
           {running && (
             <button
               type="button"
@@ -110,7 +122,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
               onClick={() =>
                 void act(
                   { action: 'reopen-game' },
-                  'Continue this game? It goes back to in progress with all players and points kept; players can rejoin with the same code. Reopen the challenges they should play.',
+                  'Continue this game? It goes back to in progress with all players and points kept; players can rejoin with the same code. Then reopen the challenges they should play, one by one or all at once.',
                 )
               }
             >
@@ -126,6 +138,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         </div>
         {running && <BigScreenPanel ctx={ctx} busy={busy} onUpdate={() => void act({ action: 'publish-standings' })} />}
         {running && ctx.snapshot.spotlightChoices.length > 0 && <SpotlightPanel ctx={ctx} busy={busy} act={act} />}
+        {(running || finished) && (ctx.snapshot.presentationDeck.length > 0 || ctx.snapshot.presentation) && <PresentationPanel ctx={ctx} busy={busy} act={act} />}
         {(running || finished) && (
           <div className={`reveal-panel${game.resultsRevealed ? ' is-revealed' : ''}`}>
             <span className="grow stack gap-xs">
@@ -208,6 +221,132 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         <h2 className="section-title">Activity</h2>
         <ActivityFeed items={activity} clockOffset={ctx.clockOffset} limit={40} />
       </section>
+    </div>
+  );
+}
+
+/**
+ * The results presentation: closed challenges' slides on the big screen (e.g. every caption,
+ * or how the room answered the Hot Takes). The host steps through them (also with the arrow
+ * keys) or lets them play by themselves.
+ */
+function PresentationPanel({ ctx, busy, act }: { ctx: HostCtx; busy: boolean; act: Act }) {
+  const { presentation, presentationDeck } = ctx.snapshot;
+  const [left, setLeft] = useState<string[]>([]);
+  const [autoplay, setAutoplay] = useState(true);
+  const picked = presentationDeck.filter((d) => !left.includes(d.instanceId));
+  const slides = picked.reduce((n, d) => n + d.slides, 0);
+  // Moving on should feel instant (and work while a previous move is still on its way).
+  const go = (to: PresentationMove) => void ctx.act({ action: 'move-presentation', to });
+
+  const live = presentation !== null;
+  useEffect(() => {
+    if (!live) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      const to: PresentationMove | null =
+        e.key === 'ArrowRight' ? 'next' : e.key === 'ArrowLeft' ? 'previous' : e.key === 'PageDown' ? 'next-slide' : e.key === 'PageUp' ? 'previous-slide' : null;
+      if (!to) return;
+      e.preventDefault();
+      void ctx.act({ action: 'move-presentation', to });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [live, ctx]);
+
+  if (!presentation) {
+    return (
+      <div className="screen-panel presentation-panel">
+        <span className="grow stack gap-xs">
+          <strong>🎞 Results presentation</strong>
+          <span className="muted small">
+            Show what everyone made on the big screen, one slide at a time: {slides} {slides === 1 ? 'slide' : 'slides'} from {picked.length} closed{' '}
+            {picked.length === 1 ? 'challenge' : 'challenges'}. Slides show no points.
+          </span>
+          <span className="presentation-picks">
+            {presentationDeck.map((d) => (
+              <label key={d.instanceId} className="checkbox-inline">
+                <input
+                  type="checkbox"
+                  checked={!left.includes(d.instanceId)}
+                  disabled={busy}
+                  onChange={(e) => setLeft((l) => (e.target.checked ? l.filter((id) => id !== d.instanceId) : [...l, d.instanceId]))}
+                />{' '}
+                {d.title} <span className="muted">({d.slides})</span>
+              </label>
+            ))}
+          </span>
+        </span>
+        <div className="presentation-start">
+          <label className="checkbox-inline">
+            <input type="checkbox" checked={autoplay} disabled={busy} onChange={(e) => setAutoplay(e.target.checked)} /> Play by itself
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || picked.length === 0}
+            onClick={() => void act({ action: 'start-presentation', instanceIds: picked.map((d) => d.instanceId), autoplay })}
+          >
+            🎞 Present
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const p = presentation;
+  const atEnd = p.index === p.total - 1 && p.step === p.stepCount - 1;
+  const atStart = p.index === 0 && p.step === 0;
+  return (
+    <div className="screen-panel presentation-panel is-live">
+      <span className="grow stack gap-xs">
+        <strong>
+          🎞 On the big screen: {p.title}
+          {p.slideCount > 1 ? ` · slide ${p.slide + 1} of ${p.slideCount}` : ''}
+          {p.stepCount > 1 ? ` · ${p.step + 1} of ${p.stepCount}` : ''}
+        </strong>
+        <span className="muted small">
+          Slide {p.index + 1} of {p.total} · {p.autoplay ? 'playing by itself' : atEnd ? 'the end' : 'you move it on'} · ← → step, Page Up / Down slide
+        </span>
+      </span>
+      <div className="presentation-controls">
+        <button type="button" className="btn btn-icon btn-secondary" aria-label="Previous slide" title="Previous slide (Page Up)" disabled={atStart} onClick={() => go('previous-slide')}>
+          ⏮
+        </button>
+        <button type="button" className="btn btn-icon btn-secondary" aria-label="Back" title="Back (←)" disabled={atStart} onClick={() => go('previous')}>
+          ◀
+        </button>
+        <button type="button" className="btn btn-icon btn-primary" aria-label="Next" title="Next (→)" disabled={atEnd} onClick={() => go('next')}>
+          ▶
+        </button>
+        <button type="button" className="btn btn-icon btn-secondary" aria-label="Next slide" title="Next slide (Page Down)" disabled={p.index === p.total - 1} onClick={() => go('next-slide')}>
+          ⏭
+        </button>
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act({ action: 'autoplay-presentation', on: !p.autoplay })}>
+          {p.autoplay ? '❙❙ Hold' : atEnd ? '↻ Play again' : '⏵ Play'}
+        </button>
+        <label className="sr-only" htmlFor="presentation-jump">
+          Go to challenge
+        </label>
+        <select
+          id="presentation-jump"
+          className="input input-sm"
+          value={p.instanceId}
+          onChange={(e) => go({ instanceId: e.target.value })}
+        >
+          {presentationDeck
+            .filter((d) => d.included)
+            .map((d) => (
+              <option key={d.instanceId} value={d.instanceId}>
+                {d.title}
+              </option>
+            ))}
+        </select>
+        <button type="button" className="btn btn-danger btn-ghost" disabled={busy} onClick={() => void act({ action: 'stop-presentation' })}>
+          ■ Stop
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,14 @@
+{
+  "id": "fill-in-the-blanks",
+  "name": "Fill in the Blanks",
+  "version": "1.2.0",
+  "apiVersion": "2",
+  "category": "creativity",
+  "description": "Sentences with words left out: fill in the blanks however you like. Every sentence you complete earns points, and the big screen can show everyone's version afterwards.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 180 },
+  "capabilities": ["text-input", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

@@ -22,7 +22,7 @@ const ada: PlayerRef = { id: 'p1', displayName: 'Ada', connected: true };
 const bea: PlayerRef = { id: 'p2', displayName: 'Bea', connected: true };
 const cyd: PlayerRef = { id: 'p3', displayName: 'Cyd', connected: true };
 
-const config = { targetSeconds: 35, hideAfterSeconds: 5, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 };
+const config = { targetSeconds: 35, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 };
 
 /** A stop submitted `serverMs` after the attempt started, claiming `clock` ms on the phone. */
 const sub = (playerId: string, startedAt: number, serverMs: number, clock: number): Submission<{ clock: number }> => ({
@@ -36,21 +36,20 @@ const sub = (playerId: string, startedAt: number, serverMs: number, clock: numbe
 
 describe('stop-the-clock', () => {
   it('has a consistent manifest: automatic, immediate, one stop per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'stop-the-clock', version: '1.0.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'stop-the-clock', version: '1.1.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
-  it('shows the target and a phone-timed stopwatch that hides after the configured time', () => {
+  it('shows the target and a phone-timed stopwatch that stays visible (Time Estimation is the one without a clock)', () => {
     const { ctx } = fakeCtx([ada]);
     const view = mod.guestView(mod.createInstance(config, ctx), ada, ctx);
     expect(view.canSubmit).toBe(true);
     const json = JSON.stringify(view.ui);
     expect(json).toContain('35.000 s');
-    expect(json).toContain(JSON.stringify({ type: 'stopwatch', name: 'clock', hideAfterSeconds: 5 }));
-    // Hidden from the start, or visible all the way when the hiding comes after the target.
-    expect(JSON.stringify(mod.guestView(mod.createInstance({ ...config, hideAfterSeconds: 0 }, ctx), ada, ctx).ui)).toContain('"hideAfterSeconds":0');
-    expect(JSON.stringify(mod.guestView(mod.createInstance({ ...config, hideAfterSeconds: 35 }, ctx), ada, ctx).ui)).not.toContain('hideAfterSeconds');
-    expect(JSON.stringify(mod.introView!(mod.createInstance(config, ctx), ada, ctx))).toContain('disappears after 5 s');
+    expect(json).toContain(JSON.stringify({ type: 'stopwatch', name: 'clock' }));
+    // Games from 1.0 still carry `hideAfterSeconds`: it is ignored.
+    expect(JSON.stringify(mod.guestView(mod.createInstance({ ...config, hideAfterSeconds: 0 }, ctx), ada, ctx).ui)).not.toContain('hideAfterSeconds');
+    expect(JSON.stringify(mod.introView!(mod.createInstance(config, ctx), ada, ctx))).toContain('You can see the clock all the way');
   });
 
   it('notes the server time of Start and accepts only that live action', () => {

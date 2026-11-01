@@ -26,6 +26,10 @@ import type {
   LeaderboardEntry,
   PlayerPublic,
   PlayerRef,
+  PresentationDeckEntry,
+  PresentationMove,
+  PresentationSlide,
+  PresentationView,
   PublishedStanding,
   ScoreAward,
   ScoredSubmissionSummary,
@@ -44,6 +48,7 @@ import { createSeededRng, generateGameCode, hashToken, newId, newToken, randomSe
 import { computeLeaderboard } from './leaderboard.ts';
 import { STANDINGS_FEED_LIMIT, diffStandings } from './standings.ts';
 import { SPOTLIGHT_IDLE_SECONDS, SPOTLIGHT_SECONDS, emptySpotlight, pickSpotlight } from './spotlight.ts';
+import { PRESENTATION_STEP_SECONDS, locate, move, type DeckPosition, type DeckSlide } from './presentation.ts';
 import type {
   PersistedAssignment,
   PersistedAttempt,
@@ -112,6 +117,19 @@ const REVERSAL = /^[a-z-]+-reversal:(.+)$/;
 const timerKey = (instanceId: string, playerId: string | null, tag: string) => `${instanceId}|${playerId ?? ''}|${tag}`;
 const assignmentKey = (assignmentId: string) => `assignment|${assignmentId}`;
 const SPOTLIGHT_TIMER = 'spotlight';
+const PRESENTATION_TIMER = 'presentation';
+/** Host actions that still work once the game is finished. */
+const ALWAYS_ALLOWED = new Set<string>(['reveal-results', 'reopen-game', 'start-presentation', 'move-presentation', 'autoplay-presentation', 'stop-presentation']);
+
+/** The results presentation on the big screen (kept in memory: a server restart ends it). */
+interface PresentationState {
+  /** The challenges it shows, in board order. */
+  instanceIds: string[];
+  at: DeckPosition;
+  autoplay: boolean;
+  startedAt: number;
+  endsAt: number | null;
+}
 
 /**
  * One running game: a board of challenge instances that players attempt at their own
@@ -134,6 +152,9 @@ export class GameRuntime {
   private actionCommitTimer: unknown = null;
   private actionPersistTimer: unknown = null;
   private readonly actionBuckets = new Map<string, number[]>();
+  private presentation: PresentationState | null = null;
+  /** Slides per closed instance, built once per commit (`seq`) for every snapshot that needs them. */
+  private slideCache: { seq: number; slides: Map<string, PresentationSlide[]> } = { seq: -1, slides: new Map() };
 
   constructor(doc: PersistedGame, deps: RuntimeDeps) {
     this.doc = doc;
@@ -363,7 +384,7 @@ export class GameRuntime {
       sortOrder: this.doc.instances.length,
       title: '',
       category: '',
-      allowReplay: false,
+      allowReplay: loaded.manifest.suggestedReplay === true && loaded.manifest.results === 'immediate',
       configuration: validated.value,
       moduleState: null,
       phase: 'PENDING',
@@ -1249,8 +1270,17 @@ export class GameRuntime {
   performHostAction(action: HostAction): HostActionResult {
     // Revealing stays possible after the game is closed, so hidden results are never lost,
     // and a closed game can be continued.
-    if (action.action !== 'reveal-results' && action.action !== 'reopen-game') this.assertNotFinished();
+    // So does the results presentation, which is what a closed game is for.
+    if (!ALWAYS_ALLOWED.has(action.action)) this.assertNotFinished();
     switch (action.action) {
+      case 'start-presentation':
+        return this.startPresentation(action.instanceIds, action.autoplay === true);
+      case 'move-presentation':
+        return this.movePresentation(action.to);
+      case 'autoplay-presentation':
+        return this.autoplayPresentation(action.on === true);
+      case 'stop-presentation':
+        return this.stopPresentation();
       case 'reopen-game':
         return this.reopenGame();
       case 'publish-standings':
@@ -1283,6 +1313,8 @@ export class GameRuntime {
         return this.closeChallenge(action.instanceId);
       case 'reopen-challenge':
         return this.reopenChallenge(action.instanceId);
+      case 'reopen-all-challenges':
+        return this.reopenAllChallenges();
       case 'reset-challenge':
         return this.resetChallenge(action.instanceId);
       case 'reopen-for-player':
@@ -1442,17 +1474,47 @@ export class GameRuntime {
   private reopenChallenge(instanceId: string): HostActionResult {
     this.assertInProgress();
     const inst = this.getInstance(instanceId);
-    const loaded = this.moduleFor(inst);
     if (inst.phase === 'ACTIVE' || inst.phase === 'PENDING') throw invalidState('Challenge is already open');
-    if (loaded.manifest.results === 'onClose' && inst.phase === 'RESULTS') {
-      throw invalidState('Aggregate results were already awarded; reset the challenge instead');
+    this.reopenInstance(inst);
+    this.commit();
+    return { ok: true };
+  }
+
+  /** Every closed challenge open again, e.g. after the host continued a closed game. */
+  private reopenAllChallenges(): HostActionResult {
+    this.assertInProgress();
+    const closed = this.doc.instances.filter((i) => i.phase === 'LOCKED' || i.phase === 'EVALUATING' || i.phase === 'RESULTS');
+    for (const inst of closed) this.reopenInstance(inst);
+    this.commit();
+    return { ok: true, message: closed.length ? `${closed.length} ${closed.length === 1 ? 'challenge' : 'challenges'} open again` : 'Every challenge is already open' };
+  }
+
+  /**
+   * A closed instance back to ACTIVE. Players who already played keep their result. Points an
+   * `onClose` module awarded at the close are taken back (append-only reversal rows): it scores
+   * everyone again at the next close. Live-action ones (Hot Takes, Blob War) also give players
+   * their attempt back, so they carry on answering or pumping where they were.
+   */
+  private reopenInstance(inst: PersistedInstance): void {
+    const loaded = this.moduleFor(inst);
+    if (loaded.manifest.results === 'onClose') {
+      const before = this.doc.ledger.length;
+      this.reverseAwards(inst, `instance:${inst.id}`, 'reopen-reversal');
+      if (this.doc.ledger.length > before) this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
+      const closedAt = inst.closedAt;
+      if (loaded.module.onAction && closedAt !== null) {
+        for (const a of this.doc.attempts) {
+          // Locked by the close itself, without a submission: still playing, really.
+          if (a.challengeInstanceId !== inst.id || a.status === 'in_progress' || a.lockedAt === null || a.lockedAt < closedAt || this.submissionOf(a)) continue;
+          a.status = 'in_progress';
+          a.lockedAt = null;
+        }
+      }
     }
     inst.evaluation = null;
     inst.results = null;
     inst.closedAt = null;
     this.setPhase(inst, 'ACTIVE');
-    this.commit();
-    return { ok: true };
   }
 
   /** Wipe everything about an instance (points reversed) so it can be played again. */
@@ -1983,6 +2045,8 @@ export class GameRuntime {
       standingsFeed: player ? [] : [...this.doc.standingsFeed].reverse(),
       spotlight: player ? null : this.spotlightView(),
       spotlightChoices: isHost ? this.spotlightChoices() : [],
+      presentation: player ? null : this.presentationView(),
+      presentationDeck: isHost ? this.presentationDeck() : [],
     };
   }
 
@@ -2139,6 +2203,168 @@ export class GameRuntime {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Results presentation (module `presentation` slides, run by the host)
+  // ---------------------------------------------------------------------------
+
+  /** A closed challenge's slides; empty when it has none (or is not closed). */
+  private slidesOf(inst: PersistedInstance): PresentationSlide[] {
+    if (inst.phase !== 'RESULTS' || inst.moduleState === null) return [];
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.presentation) return [];
+    if (this.slideCache.seq !== this.doc.seq) this.slideCache = { seq: this.doc.seq, slides: new Map() };
+    const cached = this.slideCache.slides.get(inst.id);
+    if (cached) return cached;
+    const built = this.safeView(inst, () => loaded.module.presentation!(inst.moduleState, this.evaluationsOf(inst), this.ctxFor(inst)));
+    const slides = Array.isArray(built) ? built.filter((s) => s && Array.isArray(s.steps) && s.steps.length > 0) : [];
+    this.slideCache.slides.set(inst.id, slides);
+    return slides;
+  }
+
+  /** The running order of the given challenges' slides (board order). */
+  private deckOf(instanceIds: string[]): { deck: DeckSlide[]; slides: Map<string, PresentationSlide[]> } {
+    const deck: DeckSlide[] = [];
+    const slides = new Map<string, PresentationSlide[]>();
+    for (const inst of this.doc.instances) {
+      if (!instanceIds.includes(inst.id)) continue;
+      const own = this.slidesOf(inst);
+      slides.set(inst.id, own);
+      own.forEach((s, slide) => {
+        const seconds = typeof s.stepSeconds === 'number' && Number.isFinite(s.stepSeconds) ? s.stepSeconds : PRESENTATION_STEP_SECONDS;
+        deck.push({ instanceId: inst.id, slide, steps: s.steps.length, stepSeconds: Math.min(600, Math.max(1, seconds)) });
+      });
+    }
+    return { deck, slides };
+  }
+
+  private startPresentation(instanceIds: string[] | undefined, autoplay: boolean): HostActionResult {
+    const presentable = this.doc.instances.filter((i) => this.slidesOf(i).length > 0).map((i) => i.id);
+    let ids = presentable;
+    if (instanceIds !== undefined) {
+      if (!Array.isArray(instanceIds) || instanceIds.some((id) => typeof id !== 'string')) throw validationError('instanceIds must be a list of challenge ids');
+      for (const id of instanceIds) {
+        const inst = this.getInstance(id);
+        if (!presentable.includes(id)) throw invalidState(`${this.titleOf(inst)} has nothing to present (is it closed?)`);
+      }
+      ids = presentable.filter((id) => instanceIds.includes(id));
+    }
+    const { deck } = this.deckOf(ids);
+    if (deck.length === 0) throw invalidState('No closed challenge has anything to present yet');
+    const first = deck[0]!;
+    this.presentation = { instanceIds: ids, at: { instanceId: first.instanceId, slide: first.slide, step: 0, index: 0 }, autoplay, startedAt: 0, endsAt: null };
+    this.showPresentationStep(deck);
+    this.commitScreens();
+    return { ok: true };
+  }
+
+  private movePresentation(to: PresentationMove): HostActionResult {
+    const p = this.presentation;
+    if (!p) throw invalidState('No presentation is running');
+    const { deck } = this.deckOf(p.instanceIds);
+    const at = locate(deck, p.at);
+    if (!at) return this.stopPresentation();
+    const next = move(deck, at, to);
+    if (!next) {
+      if (typeof to === 'object') throw notFound('That slide is not in the presentation');
+      return { ok: true };
+    }
+    p.at = next;
+    this.showPresentationStep(deck);
+    this.commitScreens();
+    return { ok: true };
+  }
+
+  private autoplayPresentation(on: boolean): HostActionResult {
+    const p = this.presentation;
+    if (!p) throw invalidState('No presentation is running');
+    const { deck } = this.deckOf(p.instanceIds);
+    const at = locate(deck, p.at);
+    if (!at) return this.stopPresentation();
+    p.at = at;
+    p.autoplay = on;
+    // Playing from the very end starts over.
+    const last = deck[deck.length - 1]!;
+    if (on && at.index === deck.length - 1 && at.step === last.steps - 1) p.at = { instanceId: deck[0]!.instanceId, slide: deck[0]!.slide, step: 0, index: 0 };
+    this.showPresentationStep(deck);
+    this.commitScreens();
+    return { ok: true };
+  }
+
+  private stopPresentation(): HostActionResult {
+    this.presentation = null;
+    this.clearHandle(PRESENTATION_TIMER);
+    this.commitScreens();
+    return { ok: true };
+  }
+
+  /** The step at `presentation.at` starts now; while playing by itself, the next one follows in its time. */
+  private showPresentationStep(deck: DeckSlide[]): void {
+    const p = this.presentation!;
+    this.clearHandle(PRESENTATION_TIMER);
+    const now = this.deps.clock();
+    const current = deck[p.at.index];
+    // Playing stops on the last step, which stays on screen.
+    if (current && p.at.index === deck.length - 1 && p.at.step === current.steps - 1) p.autoplay = false;
+    p.startedAt = now;
+    p.endsAt = p.autoplay && current ? now + current.stepSeconds * 1000 : null;
+    if (p.endsAt === null) return;
+    this.timerHandles.set(
+      PRESENTATION_TIMER,
+      this.deps.setTimer(() => {
+        if (this.disposed) return;
+        this.timerHandles.delete(PRESENTATION_TIMER);
+        if (this.presentation !== p || !p.autoplay) return;
+        const { deck: latest } = this.deckOf(p.instanceIds);
+        const at = locate(latest, p.at);
+        if (!at) {
+          this.stopPresentation();
+          return;
+        }
+        p.at = move(latest, at, 'next') ?? at;
+        this.showPresentationStep(latest);
+        this.commitScreens();
+      }, p.endsAt - now),
+    );
+  }
+
+  private presentationView(): PresentationView | null {
+    const p = this.presentation;
+    if (!p) return null;
+    const { deck, slides } = this.deckOf(p.instanceIds);
+    const at = locate(deck, p.at);
+    if (!at) return null;
+    const inst = this.doc.instances.find((i) => i.id === at.instanceId)!;
+    const own = slides.get(at.instanceId)!;
+    const slide = own[at.slide]!;
+    return {
+      instanceId: inst.id,
+      title: this.titleOf(inst),
+      category: inst.category,
+      caption: typeof slide.caption === 'string' && slide.caption ? slide.caption : null,
+      slide: at.slide,
+      slideCount: own.length,
+      step: at.step,
+      stepCount: slide.steps.length,
+      index: at.index,
+      total: deck.length,
+      ui: slide.steps[at.step]!,
+      autoplay: p.autoplay,
+      startedAt: p.startedAt,
+      endsAt: p.endsAt,
+    };
+  }
+
+  /** Host only: every closed challenge with slides, and which ones the running presentation shows. */
+  private presentationDeck(): PresentationDeckEntry[] {
+    const out: PresentationDeckEntry[] = [];
+    for (const inst of this.doc.instances) {
+      const slides = this.slidesOf(inst).length;
+      if (slides === 0) continue;
+      out.push({ instanceId: inst.id, title: this.titleOf(inst), category: inst.category, slides, included: this.presentation?.instanceIds.includes(inst.id) ?? false });
+    }
+    return out;
+  }
+
   gameSummary(): GameSummary {
     return {
       id: this.doc.id,
@@ -2222,6 +2448,7 @@ export class GameRuntime {
       summary: includeConfig ? firstString : undefined,
       closedFor: includeConfig ? this.closedFor(inst) : undefined,
       displayPanel: withPanel ? this.displayPanelOf(inst) : undefined,
+      displayBanner: withPanel ? this.displayBannerOf(inst) : undefined,
     };
   }
 
@@ -2253,6 +2480,13 @@ export class GameRuntime {
   }
 
   /** The module's live big-screen panel (null when it has none or has not started). */
+  private displayBannerOf(inst: PersistedInstance): string | null {
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.displayBanner || inst.moduleState === null || inst.phase !== 'ACTIVE') return null;
+    const text = this.safeView(inst, () => loaded.module.displayBanner!(inst.moduleState, this.ctxFor(inst)));
+    return typeof text === 'string' && text.trim() ? text.trim().slice(0, 160) : null;
+  }
+
   private displayPanelOf(inst: PersistedInstance): UINode | null {
     const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
     if (!loaded?.module.displayPanel || inst.moduleState === null || inst.phase === 'PENDING') return null;
@@ -2603,6 +2837,20 @@ export class GameRuntime {
     }
     if (fromActions) this.persistSoon();
     else this.persist();
+  }
+
+  /**
+   * A change only the host and the big screen show (the results presentation, which lives in
+   * memory): their snapshots only, nothing to save. A step must reach the screen on time even
+   * with a room full of connected phones.
+   */
+  private commitScreens(): void {
+    if (this.disposed) return;
+    this.doc.seq += 1;
+    const seq = this.doc.seq;
+    const at = new Date(this.deps.clock()).toISOString();
+    if (this.hostConnections > 0) this.deps.emit({ gameId: this.doc.id, seq, at, type: 'GAME_STATE_SNAPSHOT', audience: 'host', payload: this.snapshotFor({ role: 'host' }) });
+    if (this.mainConnections > 0) this.deps.emit({ gameId: this.doc.id, seq, at, type: 'GAME_STATE_SNAPSHOT', audience: 'main', payload: this.snapshotFor({ role: 'main' }) });
   }
 
   /** Saving the whole document on every batch of taps is wasteful: save live-action changes every few seconds. */

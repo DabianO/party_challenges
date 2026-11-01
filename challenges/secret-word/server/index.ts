@@ -21,8 +21,12 @@ import wordsJson from '../words.json' with { type: 'json' };
 interface Config {
   maxPoints: number;
   pointsPerWord: number;
-  /** One per line or comma-separated; replaces the built-in list when it holds any word. */
+  /** One per line or comma-separated. */
   customWords?: string;
+  /** `replace` (default): only the host's words; `add`: theirs and the built-in list. */
+  customWordsUse?: 'replace' | 'add';
+  /** With `add`: the chance (0–100) that a new word comes from the host's words while some are left. */
+  customWordsChance?: number;
 }
 
 interface Played {
@@ -60,8 +64,8 @@ interface Evaluation {
 const BUILT_IN: string[] = wordsJson as string[];
 const MAX_WORD_LENGTH = 40;
 
-/** The host's own words (deduplicated, case-insensitively), or the built-in list. */
-function poolOf(config: Config): string[] {
+/** The host's own words, deduplicated case-insensitively (empty when there are none). */
+function customOf(config: Config): string[] {
   const seen = new Set<string>();
   const custom: string[] = [];
   for (const raw of (config.customWords ?? '').split(/[\n,;]+/)) {
@@ -71,7 +75,24 @@ function poolOf(config: Config): string[] {
     seen.add(key);
     custom.push(word);
   }
-  return custom.length > 0 ? custom : BUILT_IN;
+  return custom;
+}
+
+/** Where words come from: the host's own, the built-in list, or both (see `pickWord`). */
+function sourcesOf(config: Config): { custom: string[]; builtIn: boolean } {
+  const custom = customOf(config);
+  return { custom, builtIn: custom.length === 0 || config.customWordsUse === 'add' };
+}
+
+/** A random word from `pool` that nobody has had yet, or null. */
+function freshFrom(pool: string[], used: Set<string>, ctx: InstanceContext): string | null {
+  if (pool.length === 0) return null;
+  const start = Math.floor(ctx.rng() * pool.length);
+  for (let i = 0; i < pool.length; i++) {
+    const word = pool[(start + i) % pool.length]!;
+    if (!used.has(word.toLowerCase())) return word;
+  }
+  return null;
 }
 
 function pointsPerWordOf(config: Config): number {
@@ -96,22 +117,22 @@ function wordsOf(state: State, playerId: string): PlayerWords {
 }
 
 /**
- * A random word nobody has had yet. When every word is taken (a custom list that is too
- * short), words are handed out again rather than leaving the player without one.
+ * A random word nobody has had yet. Together with the built-in list, the host's words come
+ * first with their chance (`customWordsChance`) while any are left. When every word is taken
+ * (a custom list that is too short), words are handed out again rather than leaving the
+ * player without one.
  */
 function pickWord(state: State, ctx: InstanceContext): string {
-  const pool = poolOf(state.config);
+  const { custom, builtIn } = sourcesOf(state.config);
   const used = new Set<string>();
   for (const p of Object.values(state.players)) {
     if (p.current) used.add(p.current.toLowerCase());
     for (const h of p.history) used.add(h.word.toLowerCase());
   }
-  const start = Math.floor(ctx.rng() * pool.length);
-  for (let i = 0; i < pool.length; i++) {
-    const word = pool[(start + i) % pool.length]!;
-    if (!used.has(word.toLowerCase())) return word;
-  }
-  return pool[start]!;
+  if (!builtIn) return freshFrom(custom, used, ctx) ?? custom[Math.floor(ctx.rng() * custom.length)]!;
+  const chance = Math.min(100, Math.max(0, state.config.customWordsChance ?? 50)) / 100;
+  const mine = custom.length > 0 && ctx.rng() < chance ? freshFrom(custom, used, ctx) : null;
+  return mine ?? freshFrom(BUILT_IN, used, ctx) ?? freshFrom(custom, used, ctx) ?? BUILT_IN[Math.floor(ctx.rng() * BUILT_IN.length)]!;
 }
 
 const HOW_TO = 'Slip it into a conversation without the other person noticing.';

@@ -1,9 +1,9 @@
 {
   "id": "blob-war",
   "name": "Blob War",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "apiVersion": "2",
-  "category": "chaos",
+  "category": "creativity",
   "description": "Everyone gets a liquid blob on the big screen. Tap your phone to pump it up; out-pump your neighbours to push into their ground, and keep coming back or lose it. Newcomers clear room around them. When it closes, the territory freezes into a picture of who held which part of the room.",
   "players": {
     "min": 1,

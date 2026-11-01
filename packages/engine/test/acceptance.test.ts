@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolve } from 'node:path';
 import type { BoardEntry, GameEvent, GameSnapshot, UINode } from '@challenge/contract';
+import { walkUI } from '@challenge/contract';
 import { Engine, MemoryRepository, ModuleRegistry, discoverModules, type GameRuntime } from '../src/index.ts';
 import { createFakeTime } from './helpers.ts';
 
@@ -19,6 +20,8 @@ const EXPECTED_MODULES = [
   'blob-war',
   'caption-this',
   'closest-number',
+  'color-match',
+  'fill-in-the-blanks',
   'group-message',
   'image-memory',
   'likelihoods',
@@ -32,8 +35,10 @@ const EXPECTED_MODULES = [
   'report-score',
   'rivalries',
   'secret-word',
+  'selfiemotion',
   'sliding-scales',
   'stop-the-clock',
+  'time-estimation',
   'timed-reaction',
 ];
 
@@ -49,6 +54,8 @@ interface Scenario {
   resolution?: Record<string, unknown>;
   /** The module ends a player's part after one entry (`canStart` → finished): no replay. */
   noReplay?: boolean;
+  /** A live action sent right after Start, before submitting (e.g. dealing quick rounds). */
+  prepare?: unknown;
 }
 
 const SCENARIOS: Record<string, Scenario> = {
@@ -117,6 +124,31 @@ const SCENARIOS: Record<string, Scenario> = {
     inputs: (i, entry) => ({ ...submitPayloads(entry.view)[0], succeeded: i !== 1 }),
   },
   // Timed on the phone: the submitted time matches the server's own measurement.
+  // Quick rounds: Start deals the words (a live action), then the answers are submitted.
+  'color-match': {
+    configuration: { rounds: 5 },
+    prepare: { colors: 'start', choice: '2' },
+    inputs: (_i, entry) => {
+      let runId: string | null = null;
+      walkUI(entry.view!, (n) => {
+        if (n.type === 'quick-rounds') runId = n.runId;
+      });
+      return { colors: { runId, answers: Array.from({ length: 5 }, () => ({ choice: 'red', ms: 500 })) } };
+    },
+  },
+  'time-estimation': {
+    configuration: { targetSeconds: 5, fullPointsMs: 500, zeroPointsMs: 10_000 },
+    inputs: (i) => ({ clock: 5000 + 400 * i }),
+    advanceBeforeSubmit: 5000,
+  },
+  selfiemotion: {
+    configuration: { timeLimit: 120 },
+    inputs: (i) => ({ photo: `media://selfie${i}` }),
+  },
+  'fill-in-the-blanks': {
+    configuration: { sentences: [{ text: 'A party needs ___.' }, { text: '___ and ___ walk into a bar' }] },
+    inputs: (i) => ({ s0b0: `snacks ${i}`, s1b0: 'A duck', s1b1: `goose ${i}` }),
+  },
   'stop-the-clock': {
     configuration: { targetSeconds: 2, hideAfterSeconds: 1, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 },
     inputs: (i) => ({ clock: 2000 + 40 * i }),
@@ -187,6 +219,7 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
     }
   });
 
+  // One game with every module: it grows with the library, so it gets more time than the default (below).
   it('plays a full board game with every module; peers and host judge where required', async () => {
     const { registry } = await loadAll();
     const time = createFakeTime();
@@ -214,6 +247,14 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
       instances.set(id, game.addChallenge(id, scenario!.configuration, { title: `The ${id} one`, allowReplay: replayable }).id);
     }
 
+    /** The scenario's live action right after Start, and the snapshot it causes. */
+    const prepare = (id: string, playerId: string, instId: string) => {
+      const action = SCENARIOS[id]!.prepare;
+      if (action === undefined) return;
+      expect(game.moduleAction(playerId, instId, action), `${id}: prepare`).toEqual({ ok: true });
+      time.advance(300); // throttled snapshot
+    };
+
     game.performHostAction({ action: 'open-lobby' });
     const players = ['Ada', 'Grace', 'Linus'].map((n) => game.join(n).player);
     game.connect({ role: 'host' });
@@ -232,6 +273,7 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
         const p = players[i]!;
         expect(game.startAttempt(p.id, instId), `${id}: start for player ${i}`).toEqual({ ok: true });
         expect(inst.error, `${id}: start error ${inst.error}`).toBeNull();
+        prepare(id, p.id, instId);
         const entry = lastSnapshot(events, `player:${p.id}`).board.find((b) => b.instanceId === instId)!;
         expect(entry.status).toBe('in_progress');
         expect(entry.view, `${id}: guest view`).not.toBeNull();
@@ -258,6 +300,7 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
       expect(lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === instId)!.canReplay, `${id}: canReplay`).toBe(replayable);
       if (replayable) {
         expect(game.startAttempt(ada.id, instId), `${id}: replay start`).toEqual({ ok: true });
+        prepare(id, ada.id, instId);
         if (SCENARIOS[id]!.advanceBeforeSubmit) time.advance(SCENARIOS[id]!.advanceBeforeSubmit!);
         const again = lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === instId)!;
         expect(game.submit(ada.id, instId, SCENARIOS[id]!.inputs(0, again), true), `${id}: replay submit`).toEqual({ ok: true });
@@ -338,8 +381,29 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
       expect(e.series.at(-1)).toBe(e.total);
     }
     expect(final.challenges.every((c) => c.phase === 'RESULTS')).toBe(true);
+
+    // The results presentation: every module with slides, played to the end on the big screen.
+    const presentable = final.presentationDeck.map((d) => d.instanceId);
+    const withSlides = ids.filter((id) => registry.latest(id)!.module.presentation).map((id) => instances.get(id)!);
+    expect(presentable).toEqual(withSlides);
+    for (const id of ['blob-war', 'group-message', 'selfiemotion', 'fill-in-the-blanks', 'binaries']) expect(presentable, id).toContain(instances.get(id));
+    game.performHostAction({ action: 'close-game' });
+    game.performHostAction({ action: 'start-presentation', autoplay: true });
+    const seen = new Set<string>();
+    for (let k = 0; k < 500 && lastSnapshot(events, 'main').presentation?.autoplay; k++) {
+      const view = lastSnapshot(events, 'main').presentation!;
+      seen.add(view.instanceId);
+      expect(view.ui).toBeTruthy();
+      time.advance(view.endsAt! - view.startedAt);
+    }
+    const end = lastSnapshot(events, 'main').presentation!;
+    expect(end).toMatchObject({ autoplay: false, endsAt: null, index: end.total - 1 });
+    expect([...seen, end.instanceId].sort()).toEqual([...presentable].sort());
+    expect(lastSnapshot(events, `player:${players[0]!.id}`).presentation).toBeNull();
+    game.performHostAction({ action: 'stop-presentation' });
+    expect(lastSnapshot(events, 'main').presentation).toBeNull();
     expect(events.some((e) => e.type === 'MODULE_ERROR')).toBe(false);
-  });
+  }, 20_000);
 });
 
 export type { GameRuntime };

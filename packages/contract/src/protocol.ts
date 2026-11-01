@@ -147,6 +147,8 @@ export interface ChallengeInstanceSummary {
   closedFor?: string[];
   /** Main display only: the module's live big-screen panel (`displayPanel`), when it has one and has started. */
   displayPanel?: UINode | null;
+  /** Main display only: the module's line for the big screen's top bar (`displayBanner`), while open. */
+  displayBanner?: string | null;
 }
 
 export interface LeaderboardEntry {
@@ -388,6 +390,46 @@ export interface GameSnapshot {
   spotlight: SpotlightView | null;
   /** Host only: every item that can be put in the spotlight (`show-spotlight`). */
   spotlightChoices: SpotlightChoice[];
+  /**
+   * Main display & host: the results presentation slide on the big screen right now (module
+   * `presentation`), shown instead of everything else; null when no presentation runs.
+   */
+  presentation: PresentationView | null;
+  /** Host only: every closed challenge with slides, in board order (`start-presentation`). */
+  presentationDeck: PresentationDeckEntry[];
+}
+
+/** A closed challenge the host can present, and whether the running presentation includes it. */
+export interface PresentationDeckEntry {
+  instanceId: string;
+  title: string;
+  category: string;
+  slides: number;
+  included: boolean;
+}
+
+/** One step of one slide of the results presentation. */
+export interface PresentationView {
+  instanceId: string;
+  /** The challenge's title and category, for the heading. */
+  title: string;
+  category: string;
+  /** The slide's own caption, e.g. "Sentence 2 of 5". */
+  caption: string | null;
+  /** Position within this challenge's slides (0-based). */
+  slide: number;
+  slideCount: number;
+  /** Position within the slide's steps (0-based). */
+  step: number;
+  stepCount: number;
+  /** Position of this slide in the whole presentation (0-based) and its length. */
+  index: number;
+  total: number;
+  ui: UINode;
+  /** Plays by itself: the next step comes at `endsAt`. */
+  autoplay: boolean;
+  startedAt: number;
+  endsAt: number | null;
 }
 
 /** An item the host can put in the big screen's spotlight. */
@@ -539,6 +581,8 @@ export interface InstanceOptions {
   allowReplay: boolean;
 }
 
+export type PresentationMove = 'next' | 'previous' | 'next-slide' | 'previous-slide' | { instanceId: string; slide?: number };
+
 export type HostAction =
   | { action: 'open-lobby' }
   | { action: 'start-game' }
@@ -556,10 +600,18 @@ export type HostAction =
   | { action: 'show-spotlight'; instanceId: string; itemId: string; hold?: boolean }
   /** Let the spotlight rotate again after a held item (moves on at once). */
   | { action: 'release-spotlight' }
+  /** Results presentation on the big screen: the given closed challenges (default: all with slides), in board order. */
+  | { action: 'start-presentation'; instanceIds?: string[]; autoplay?: boolean }
+  /** One step or slide on or back, or straight to a challenge's slide. */
+  | { action: 'move-presentation'; to: PresentationMove }
+  | { action: 'autoplay-presentation'; on: boolean }
+  | { action: 'stop-presentation' }
   | { action: 'unlock-challenge'; instanceId: string }
   | { action: 'relock-challenge'; instanceId: string }
   | { action: 'close-challenge'; instanceId: string }
   | { action: 'reopen-challenge'; instanceId: string }
+  /** Every closed challenge open again at once (e.g. after continuing a closed game). */
+  | { action: 'reopen-all-challenges' }
   | { action: 'reset-challenge'; instanceId: string }
   /** Give one player another go at a challenge the module closed for them (`closedFor`). */
   | { action: 'reopen-for-player'; instanceId: string; playerId: string }

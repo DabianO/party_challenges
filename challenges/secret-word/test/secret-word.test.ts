@@ -58,7 +58,7 @@ function play(state: State, ctx: InstanceContext, who: PlayerRef, succeeded: boo
 
 describe('secret-word', () => {
   it('has a consistent manifest: automatic, immediate, one word per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.1.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.3.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -132,6 +132,34 @@ describe('secret-word', () => {
     // All three are used now: the next word repeats one rather than leaving Bea without a word.
     const extra = play(state, ctx, bea, false);
     expect(['Fiets', 'paraplu', 'hagelslag']).toContain(extra.word);
+  });
+
+  it('can add the host’s words to the built-in list, with a chance for theirs to come next', () => {
+    const mine = ['Fiets', 'paraplu', 'hagelslag', 'stroopwafel'];
+    const players = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, displayName: `P${i}`, connected: true }));
+    const deal = (chance: number) => {
+      const { ctx } = fakeCtx(players);
+      let state = mod.createInstance({ maxPoints: 1, pointsPerWord: 1, customWords: mine.join(', '), customWordsUse: 'add' as const, customWordsChance: chance }, ctx);
+      const got: string[] = [];
+      for (const p of players) {
+        const next = play(state, ctx, p, true);
+        got.push(next.word);
+        state = next.state;
+      }
+      return got;
+    };
+    // Always first: the host's four words, then built-in ones; never twice the same word.
+    const all = deal(100);
+    expect(all.slice(0, 4).sort()).toEqual([...mine].sort());
+    expect(new Set(all).size).toBe(40);
+    // Never: only built-in words.
+    expect(deal(0).some((w) => mine.includes(w))).toBe(false);
+    // In between: some of each, every one of the host's words used once at most.
+    const half = deal(50);
+    const ours = half.filter((w) => mine.includes(w));
+    expect(ours.length).toBeGreaterThan(0);
+    expect(new Set(ours).size).toBe(ours.length);
+    expect(half.length - ours.length).toBeGreaterThan(30);
   });
 
   it('scores each answered word on its own: points only for unnoticed words', () => {

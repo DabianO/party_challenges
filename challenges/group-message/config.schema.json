@@ -6,7 +6,7 @@
     "openingText": { "type": "string", "title": "First words of the message (optional)", "maxLength": 300 },
     "wordsPerTurn": { "type": "integer", "title": "Words a player may add per turn", "minimum": 1, "maximum": 10, "default": 3 },
     "visibleWords": { "type": "integer", "title": "Words of the message a player sees", "minimum": 5, "maximum": 200, "default": 35 },
-    "turnSeconds": { "type": "integer", "title": "Time per turn (seconds)", "minimum": 30, "maximum": 1800, "default": 300 },
+    "turnSeconds": { "type": "integer", "title": "Time per turn (seconds)", "description": "The turn moves on to the next player after this, also when their phone is asleep.", "minimum": 30, "maximum": 1800, "default": 300 },
     "maxTurnsPerPlayer": { "type": "integer", "title": "Contributions per player (maximum)", "minimum": 1, "maximum": 100, "default": 10 },
     "pointsPerTurn": { "type": "integer", "title": "Points per contribution", "minimum": 0, "maximum": 100, "default": 1 }
   }

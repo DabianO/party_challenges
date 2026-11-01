@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
-import type { GameSnapshot, LeaderboardEntry, SpotlightView } from '@challenge/contract';
+import type { GameSnapshot, LeaderboardEntry, PresentationView, SpotlightView, UINode } from '@challenge/contract';
+import { walkUI } from '@challenge/contract';
+import { FitToBox } from '../components/FitToBox';
 import { ConnectionDot, Leaderboard, rankClass } from '../components/Leaderboard';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { ProgressChart } from '../components/ProgressChart';
@@ -49,14 +51,21 @@ export function Display() {
   const logo = resolveMedia(snapshot?.game.branding.logo);
   const hostName = snapshot?.game.branding.hostName;
   const showJoin = snapshot && snapshot.game.status !== 'LOBBY' && snapshot.game.status !== 'FINISHED';
+  // Lines challenges put in the top bar (e.g. whose turn it is), while the game runs.
+  const banners = snapshot?.game.status === 'IN_PROGRESS' && !snapshot.presentation ? snapshot.challenges.filter((c) => c.displayBanner) : [];
 
   return (
-    <div className={`display${idle ? ' cursor-hidden' : ''}${snapshot?.game.status === 'IN_PROGRESS' && !fatal ? ' is-dashboard' : ''}`}>
+    <div className={`display${idle ? ' cursor-hidden' : ''}${(snapshot?.game.status === 'IN_PROGRESS' || snapshot?.presentation) && !fatal ? ' is-dashboard' : ''}`}>
       <header className="display-header">
         <div className="display-brand">{logo && <img className="brand-logo brand-logo-lg" src={logo} alt="" />}</div>
         <div className="display-title">
           <span className="display-game-name">{snapshot?.game.name ?? 'Challenge Platform'}</span>
           {hostName && <span className="display-host muted">Hosted by {hostName}</span>}
+          {banners.map((c) => (
+            <span key={c.id} className="header-banner" role="status">
+              <span className="header-banner-title">{c.title}</span> {c.displayBanner}
+            </span>
+          ))}
         </div>
         {showJoin ? (
           <div className="display-join" aria-label="How to join">
@@ -111,6 +120,8 @@ export function Display() {
 }
 
 function DisplayBody({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOffset: number }) {
+  // The host's results presentation takes the whole screen, whatever else is going on.
+  if (snapshot.presentation) return <Presentation view={snapshot.presentation} clockOffset={clockOffset} />;
   switch (snapshot.game.status) {
     case 'DRAFT':
       return (
@@ -201,7 +212,8 @@ function Dashboard({ snapshot, clockOffset }: { snapshot: GameSnapshot; clockOff
   const now = useNow(5000) + clockOffset;
   // Everything shares one screen, never scrolling: the race, live panels from challenges
   // (e.g. Blob War) and the spotlight (e.g. Hot Takes), in a grid of up to 2 × 2 (more rows if needed).
-  const panels = challenges.filter((c) => c.displayPanel);
+  // Pictures (e.g. Blob War's field) first, so the other panels (e.g. the latest sentences) sit underneath them.
+  const panels = challenges.filter((c) => c.displayPanel).sort((a, b) => Number(isPicture(b.displayPanel)) - Number(isPicture(a.displayPanel)));
   const tiles = 1 + panels.length + (spotlight ? 1 : 0);
   return (
     <div className="dashboard">
@@ -299,21 +311,39 @@ function PlayerKey({ snapshot }: { snapshot: GameSnapshot }) {
 }
 
 /**
- * A bar that runs down until the spotlight moves on. Where it starts is worked out once, when
- * the item appears: recomputing it on every snapshot would restart the animation further
- * along each time and make the bar run out early.
+ * A bar that runs down until the spotlight (or the presentation) moves on. It is drawn from
+ * the clock on every frame, not as a CSS animation: animations are cut short when the system
+ * asks for reduced motion, and the bar would then sit empty for the whole wait.
  */
 function SpotlightTime({ startedAt, endsAt, clockOffset }: { startedAt: number; endsAt: number; clockOffset: number }) {
-  const [timing] = useState(() => {
+  const bar = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
     const duration = Math.max(1, endsAt - startedAt);
-    const elapsed = Math.min(duration, Math.max(0, Date.now() + clockOffset - startedAt));
-    return { animationDuration: `${duration}ms`, animationDelay: `-${elapsed}ms` };
-  });
+    let frame = 0;
+    const draw = () => {
+      const left = Math.min(1, Math.max(0, (endsAt - (Date.now() + clockOffset)) / duration));
+      if (bar.current) bar.current.style.transform = `scaleX(${left})`;
+      if (left > 0) frame = requestAnimationFrame(draw);
+    };
+    draw();
+    // Frames stop in a background tab: catch up when it comes back.
+    const tick = window.setInterval(draw, 1000);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearInterval(tick);
+    };
+  }, [startedAt, endsAt, clockOffset]);
   return (
     <span className="spotlight-time" aria-hidden="true">
-      <span style={timing} />
+      <span ref={bar} />
     </span>
   );
+}
+
+function isPicture(node: UINode | null | undefined): boolean {
+  let found = false;
+  if (node) walkUI(node, (n) => (found ||= n.type === 'blob-field'));
+  return found;
 }
 
 function panelTile(c: GameSnapshot['challenges'][number]) {
@@ -341,6 +371,38 @@ function Spotlight({ spot, clockOffset }: { spot: SpotlightView; clockOffset: nu
       <div className="race-panel-body">
         <UIView key={`${spot.instanceId}/${spot.itemId}`} node={spot.ui} className="ui-display ui-spotlight" />
       </div>
+    </section>
+  );
+}
+
+/**
+ * One slide of the host's results presentation, shrunk to fit the screen when it has a lot on
+ * it. Steps of the same slide update it in place (so e.g. entries roll through a sentence); a
+ * new slide fades in.
+ */
+function Presentation({ view, clockOffset }: { view: PresentationView; clockOffset: number }) {
+  const slideKey = `${view.instanceId}/${view.slide}`;
+  const where = [view.caption, view.slideCount > 1 ? `${view.slide + 1} of ${view.slideCount}` : ''].filter(Boolean).join(' · ');
+  return (
+    <section className="presentation" aria-label={`${view.title}${where ? `, ${where}` : ''}`}>
+      <header className="presentation-head">
+        <div className="presentation-heading">
+          {view.category && view.category !== view.title && <span className="display-eyebrow">{view.category}</span>}
+          <h1 className="presentation-title">{view.title}</h1>
+        </div>
+        {where && <span className="presentation-where">{where}</span>}
+      </header>
+      {view.endsAt !== null ? (
+        <SpotlightTime key={view.startedAt} startedAt={view.startedAt} endsAt={view.endsAt} clockOffset={clockOffset} />
+      ) : (
+        <span className="spotlight-time is-held" aria-hidden="true" />
+      )}
+      <FitToBox key={slideKey} className="presentation-body">
+        <UIView key={slideKey} node={view.ui} className="ui-display ui-presentation" />
+      </FitToBox>
+      <footer className="presentation-foot" aria-hidden="true">
+        {view.index + 1} / {view.total}
+      </footer>
     </section>
   );
 }

@@ -1,8 +1,9 @@
 /**
  * Stop the Clock (contract v2).
  *
- * The player starts a stopwatch and tries to stop it at exactly `targetSeconds`; the running
- * time disappears after `hideAfterSeconds`, so they have to count in their head.
+ * The player starts a stopwatch and tries to stop it at exactly `targetSeconds`, watching the
+ * running time all the way: it is all about milliseconds. (Time Estimation is the version
+ * without a clock.) Games made before 1.1 may still carry `hideAfterSeconds`: it is ignored.
  *
  * Unlike Timed Reaction, the time is measured on the phone (`ui.stopwatch`): both taps are
  * timed by the same device clock, so Wi-Fi delay does not count and results are accurate to
@@ -16,7 +17,8 @@ import schemaJson from '../config.schema.json' with { type: 'json' };
 
 interface Config {
   targetSeconds: number;
-  hideAfterSeconds: number;
+  /** No longer used (the clock is always visible since 1.1). */
+  hideAfterSeconds?: number;
   maxPoints: number;
   fullPointsMs: number;
   zeroPointsMs: number;
@@ -85,11 +87,6 @@ function pointsFor(offMs: number, config: Config): number {
   if (off <= full) return max;
   const step = (zero - full) / max;
   return Math.min(max, Math.max(0, max - Math.floor((off - full) / step)));
-}
-
-/** The visible part of the run, or none when the clock stays visible all the way. */
-function hideAfter(config: Config): number | undefined {
-  return config.hideAfterSeconds >= config.targetSeconds ? undefined : Math.max(0, config.hideAfterSeconds);
 }
 
 export default defineModule<Config, State, Input, Evaluation>({
@@ -179,13 +176,10 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   introView(state) {
     const c = state.config;
-    const hide = hideAfter(c);
     return ui.stack(
       [
         ui.text(`Start the stopwatch and stop it at exactly ${secs(targetMs(c))}.`),
-        ui.caption(
-          `${hide === undefined ? 'You can see the time all the way.' : hide > 0 ? `The time disappears after ${hide} s, so count in your head.` : 'You will not see the time, so count in your head.'} ${c.maxPoints} points within ${c.fullPointsMs} ms, fewer the further off you are.`,
-        ),
+        ui.caption(`You can see the clock all the way: it is all about milliseconds. ${c.maxPoints} points within ${c.fullPointsMs} ms, fewer the further off you are.`),
       ],
       { gap: 'sm' },
     );
@@ -197,7 +191,7 @@ export default defineModule<Config, State, Input, Evaluation>({
       ui: ui.stack(
         [
           ui.card([ui.caption('Stop the clock at exactly', { align: 'center' }), ui.display(secs(targetMs(c)))], 'primary'),
-          ui.stopwatch(CLOCK, { hideAfterSeconds: hideAfter(c) }),
+          ui.stopwatch(CLOCK),
         ],
         { gap: 'lg', align: 'stretch' },
       ),
@@ -207,7 +201,7 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   mainView(state) {
-    return ui.caption(`Stop the clock at exactly ${secs(targetMs(state.config))}, without looking!`);
+    return ui.caption(`Stop the clock at exactly ${secs(targetMs(state.config))}, to the millisecond!`);
   },
 
   resultsView(state, evaluations) {

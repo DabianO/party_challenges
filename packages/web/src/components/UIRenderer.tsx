@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type FormEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent } from 'react';
 import type {
   AudioNode,
   BadgeNode,
@@ -19,6 +19,7 @@ import type {
   TapPadNode,
   StopwatchNode,
   LiveAnswerNode,
+  QuickRoundsNode,
   TextInputNode,
   TextNode,
   TimerInfo,
@@ -30,6 +31,7 @@ import type {
 } from '@challenge/contract';
 import { isInputNode, walkUI } from '@challenge/contract';
 import { resolveMedia } from '../lib/media';
+import { readDraft, saveDraft } from '../lib/storage';
 import { formatPoints } from '../lib/time';
 import { BlobField } from './blobs/BlobField';
 import { Countdown } from './Countdown';
@@ -37,6 +39,8 @@ import { TapPad } from './TapPad';
 import { Stopwatch } from './Stopwatch';
 import { LiveAnswer } from './LiveAnswer';
 import { Distribution } from './Distribution';
+import { QuickRounds } from './QuickRounds';
+import { Spool } from './Spool';
 
 /** Uploads a guest evidence file (FR-57) and resolves to its `media://` reference. */
 export type EvidenceUploader = (file: File) => Promise<{ ref: string; url?: string }>;
@@ -159,16 +163,24 @@ export interface UIViewProps {
   uploadEvidence?: EvidenceUploader;
   /** Enables `tap-pad` nodes and `stopwatch` start signals: live actions for the module's `onAction` (not submissions). */
   onAction?: (payload: Payload) => void;
+  /**
+   * Keeps what the player filled in (text, an uploaded photo) for this browser tab under this
+   * key, so a page reload does not lose it. Use one key per attempt.
+   */
+  draftKey?: string;
 }
 
 /**
  * Renders a module UI tree. Give it a `key` that changes per challenge instance so
  * form state resets between challenges.
  */
-export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, clockOffset = 0, paused = false, className, uploadEvidence, onAction }: UIViewProps) {
+export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, clockOffset = 0, paused = false, className, uploadEvidence, onAction, draftKey }: UIViewProps) {
   const inputs = useMemo(() => collectInputs(node), [node]);
   const serverValues = useMemo(() => serverValuesOf(inputs), [inputs]);
-  const [edits, setEdits] = useState<Record<string, unknown>>({});
+  const [edits, setEdits] = useState<Record<string, unknown>>(() => (draftKey ? readDraft(draftKey) : {}));
+  useEffect(() => {
+    if (draftKey) saveDraft(draftKey, edits);
+  }, [draftKey, edits]);
   const [submitting, setSubmitting] = useState(false);
   const values = useMemo(() => ({ ...serverValues, ...edits }), [serverValues, edits]);
   const interactive = typeof onSubmit === 'function';
@@ -232,6 +244,11 @@ function StopwatchNodeView({ node }: { node: StopwatchNode }) {
   return <Stopwatch node={node} enabled={form.interactive && !form.disabled} submitting={form.submitting} onStart={form.action} onStop={(payload) => form.submit(payload)} />;
 }
 
+function QuickRoundsNodeView({ node }: { node: QuickRoundsNode }) {
+  const form = useContext(FormContext);
+  return <QuickRounds node={node} enabled={form.interactive && !form.disabled} submitting={form.submitting} onStart={form.action} onDone={(payload) => form.submit(payload)} />;
+}
+
 // ---------------------------------------------------------------------------
 // Node dispatcher
 // ---------------------------------------------------------------------------
@@ -293,6 +310,11 @@ function Node({ node }: { node: UINode }) {
     case 'blob-field':
       // Keyed by mode: the closing picture starts fresh instead of animating out of the live field.
       return <BlobField key={node.mode} node={node} />;
+    case 'quick-rounds':
+      return <QuickRoundsNodeView node={node} />;
+    case 'spool':
+      // Another sentence starts afresh; new entries of the same sentence roll in.
+      return <Spool key={node.parts.join('\u0000')} node={node} />;
     default: {
       // The server knows content this page does not: the page is older than the server
       // (opened before an update, or kept asleep in a phone's background). Reloading fixes it.

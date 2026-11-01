@@ -65,7 +65,8 @@ that header.
 | `unlock-challenge` `{instanceId}` | PENDING → ACTIVE |
 | `relock-challenge` `{instanceId}` | ACTIVE → PENDING (hidden again; running attempts continue) |
 | `close-challenge` `{instanceId}` | ACTIVE → LOCKED: running attempts lock, `onClose` modules are evaluated, immediate modules reach RESULTS once nothing is pending |
-| `reopen-challenge` `{instanceId}` | LOCKED/EVALUATING/RESULTS(immediate) → ACTIVE |
+| `reopen-challenge` `{instanceId}` | LOCKED/EVALUATING/RESULTS → ACTIVE. Players who played keep their result. For `onClose` modules the points awarded at the close are reversed (they are awarded again at the next close), and live-action ones (Hot Takes, Blob War) give players the attempt the close ended back |
+| `reopen-all-challenges` | The same for every closed challenge at once (e.g. after `reopen-game`) |
 | `reset-challenge` `{instanceId}` | Reverse all points for the instance, wipe attempts/submissions/assignments, re-open |
 | `reopen-for-player` `{instanceId, playerId}` | Give one player another go at a challenge the module closed for them (listed in the host-only `closedFor` of the challenge summary); points already earned or deducted stay |
 | `assign-challenge` `{instanceId, playerIds}` | Make the instance available to specific players only |
@@ -77,6 +78,10 @@ that header.
 | `clear-avatar` | `{ playerId }`: take a player's selfie off (they get their icon back) |
 | `show-spotlight` | `{ instanceId, itemId, hold? }`: put one spotlight item (e.g. a Hot Take) on the big screen now, for a minute or, with `hold`, until `release-spotlight` |
 | `release-spotlight` | Let the spotlight rotate again after a held item (the next one comes up at once) |
+| `start-presentation` | `{ instanceIds?, autoplay? }`: the results presentation on the big screen, with the slides (module `presentation`) of the given closed challenges, default all that have any, in board order. Also on a finished game |
+| `move-presentation` | `{ to }`: `next` / `previous` (a step; at a slide's end, the next slide), `next-slide` / `previous-slide`, or `{ instanceId, slide? }` |
+| `autoplay-presentation` | `{ on }`: play by itself (each step for its `stepSeconds`, stopping on the last one; from the end it starts over) or hold |
+| `stop-presentation` | Back to the normal big screen |
 | `publish-standings` | Copy the current leaderboard (with graph lines) to the big screen and append ranking changes (new leader, overtakes, newcomers, drawing level) to the standings feed. The big screen changes only on this action; phones are not affected |
 | `reveal-results` / `hide-results` | Show (or hide again) points, ranks and results to players and the main display. Games start hidden; the host always sees everything. `reveal-results` also works on a FINISHED game |
 | `end-game` | Close every open challenge, hand unanswered peer tasks to the host, → GAME_RESULTS |
@@ -111,10 +116,17 @@ activity is dropped and `PLAYER_SCORED` events go to the host only. `RESULTS_REV
 the one exception: personal practice feedback the module chooses to show right away.
 
 The main display's challenge summaries carry `displayPanel` (the module's live big-screen
-panel, or null).
+panel, or null) and `displayBanner` (its line for the top bar while open, or null).
 
 Host and main display also receive `standings` (the last published copy, or null) and
 `standingsFeed` (newest first), independent of `resultsRevealed`; players receive neither.
+
+Host and main display receive `presentation` while the host runs the results presentation
+(the current step of the current slide: `ui`, the challenge's `title`/`category`, the slide's
+`caption`, `slide`/`slideCount`, `step`/`stepCount`, `index`/`total` over the whole
+presentation, `autoplay` and `startedAt`/`endsAt`), else null; the host also receives
+`presentationDeck` (every closed challenge with slides and whether it is included). The
+presentation lives in server memory: a restart ends it.
 
 Each leaderboard entry carries `series` for the progress graph: the running total after each
 challenge the player finished, in their own finishing order (index 0 = start). A replayed

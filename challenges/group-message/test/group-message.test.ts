@@ -38,7 +38,7 @@ function contribute(state: ReturnType<typeof mod.createInstance>, ctx: InstanceC
 
 describe('group-message', () => {
   it('has a consistent manifest: automatic, immediate, repeated attempts', () => {
-    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.1.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.4.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -93,16 +93,41 @@ describe('group-message', () => {
     expect(mod.getStatistics(state, [], ctx)).toMatchObject({ words: 12 });
   });
 
-  it('moves on when a turn is not used and prefers players whose phone is connected', () => {
-    const offline: PlayerRef = { ...bea, connected: false };
-    const { ctx } = fakeCtx([ada, offline, cyd]);
+  it('passes the turn to the next in line even when their phone is asleep, and moves on when it is not used', () => {
+    // Ada on a laptop, Bea's phone on stand-by: Ada must not keep the turn.
+    const asleep: PlayerRef = { ...bea, connected: false };
+    const { ctx, scheduled } = fakeCtx([ada, asleep]);
     let state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
     expect(state.turn?.playerId).toBe('p1');
-    state = mod.onTimer!(state, 'turn', ctx); // Ada let it run out
-    expect(state.turn?.playerId).toBe('p3'); // Bea is offline
-    state = mod.onTimer!(state, 'turn', ctx);
+    state = contribute(state, ctx, ada, 'Happy birthday');
+    expect(state.turn?.playerId).toBe('p2');
+    expect(scheduled.at(-1)).toEqual({ tag: 'turn', seconds: 300, playerId: undefined });
+    expect(mod.canStart!(state, ada, ctx)).toMatchObject({ ok: false, reason: 'Bea is writing — wait for your turn' });
+    state = mod.onTimer!(state, 'turn', ctx); // Bea's phone slept through her turn
     expect(state.turn?.playerId).toBe('p1');
-    expect(state.offered).toEqual({ p1: 2, p3: 1 });
+    state = mod.onTimer!(state, 'turn', ctx);
+    expect(state.turn?.playerId).toBe('p2');
+    expect(state.offered).toEqual({ p1: 2, p2: 2 });
+    // Everyone asleep: the turn still goes round.
+    const all = fakeCtx([{ ...ada, connected: false }, asleep, { ...cyd, connected: false }]).ctx;
+    let round = mod.onPhaseChange!(mod.createInstance(config, all), 'ACTIVE', all);
+    const holders = [round.turn!.playerId];
+    for (let i = 0; i < 3; i++) {
+      round = mod.onTimer!(round, 'turn', all);
+      holders.push(round.turn!.playerId);
+    }
+    expect(holders).toEqual(['p1', 'p2', 'p3', 'p1']);
+  });
+
+  it('shows in the top bar of the big screen whose turn it is, never the message', () => {
+    const { ctx } = fakeCtx([ada, bea]);
+    let state = mod.createInstance({ ...config, openingText: 'A secret beginning' }, ctx);
+    expect(mod.displayBanner!(state, ctx)).toBeNull();
+    state = mod.onPhaseChange!(state, 'ACTIVE', ctx);
+    state = contribute(state, ctx, ada, 'Happy birthday');
+    expect(mod.displayBanner!(state, ctx)).toBe("✍️ Bea's turn to write: open your phone");
+    expect(mod.displayPanel).toBeUndefined();
+    expect(mod.displayBanner!(mod.onPhaseChange!(state, 'LOCKED', ctx), ctx)).toBeNull();
   });
 
   it('waits for players, and drops the turn while the challenge is closed', () => {
@@ -125,5 +150,25 @@ describe('group-message', () => {
     const evaluation = mod.evaluate(state, [sub('p1', ' happy  birthday ')], ctx);
     expect(evaluation).toEqual({ playerId: 'p1', displayName: 'Ada', text: 'happy birthday' });
     expect(mod.calculateScores(state, evaluation, ctx)).toEqual([{ playerId: 'p1', points: 1, reason: 'Added to the message' }]);
+  });
+
+  it('shows the message in readable parts on the big screen, ending at sentence ends', () => {
+    const { ctx } = fakeCtx([ada, bea]);
+    const sentence = (n: number) => `${Array.from({ length: 9 }, (_, i) => `word${n}x${i}`).join(' ')} end${n}.`;
+    const story = Array.from({ length: 12 }, (_, i) => sentence(i)).join(' '); // 120 words, 10 a sentence
+    const state = { ...mod.createInstance({ ...config, openingText: story }, ctx) };
+    const slides = mod.presentation!(state, [], ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Part 1 of 3', 'Part 2 of 3', 'Part 3 of 3']);
+    const texts = slides.map((s) => JSON.stringify(s.steps[0]));
+    // The prompt above the first part; every part but the last ends at a sentence end.
+    expect(texts[0]).toContain('Birthday message for Sam');
+    expect(texts[0]).toContain('end3. …');
+    expect(texts[1]).toContain('"… word4x0');
+    expect(texts[1]).toContain('end7. …');
+    expect(texts[2]).toContain('end11."');
+    expect(slides.every((s) => s.stepSeconds! >= 8)).toBe(true);
+    // A short message is one slide; no message, no slides.
+    expect(mod.presentation!(mod.createInstance({ ...config, openingText: 'Happy birthday!' }, ctx), [], ctx)).toHaveLength(1);
+    expect(mod.presentation!(mod.createInstance(config, ctx), [], ctx)).toEqual([]);
   });
 });

@@ -196,7 +196,7 @@ describe('blob-war territory', () => {
 
 describe('blob-war', () => {
   it('has a consistent manifest: live actions, scored when closed', () => {
-    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.4.0', apiVersion: '2', results: 'onClose' });
+    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.5.0', category: 'creativity', apiVersion: '2', results: 'onClose' });
     expect(mod.manifest.capabilities).toContain('real-time-burst');
     expect(typeof mod.onPlayerJoin).toBe('function');
   });
@@ -380,5 +380,18 @@ describe('blob-war', () => {
     expect(scores.map((s) => s.playerId)).toEqual(['a', 'b']); // Cyd never pumped
     expect(scores[1]!.points).toBeGreaterThan(2);
     expect(scores[1]!.points).toBeLessThan(8);
+  });
+
+  it('presents the closing picture on one slide', () => {
+    const players = [p('a', 'Ada'), p('b', 'Bea')];
+    const { ctx } = fakeCtx(players);
+    let state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
+    state = pump(state, ctx, players[0]!, 20);
+    state = mod.onPhaseChange!(state, 'LOCKED', ctx);
+    const slides = mod.presentation!(state, [], ctx);
+    expect(slides).toHaveLength(1);
+    const node = slides[0]!.steps[0]!;
+    expect(find(node, 'blob-field')).toMatchObject({ mode: 'final', fieldId: 'i1' });
+    expect(JSON.stringify(node)).toMatch(/Ada \d+(\.\d)?% · Bea/);
   });
 });

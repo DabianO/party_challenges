@@ -16,6 +16,7 @@ export interface PlayerSession {
 }
 
 const HOSTED_KEY = 'cp.hostedGames';
+const DRAFT_PREFIX = 'cp.draft.';
 const SESSIONS_KEY = 'cp.playerSessions';
 
 function read<T>(key: string, fallback: T): T {
@@ -33,6 +34,30 @@ function write(key: string, value: unknown): void {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* storage unavailable (private mode, quota) — the app still works for this session */
+  }
+}
+
+/**
+ * What a player filled in on a challenge screen but has not sent yet (typed text, an uploaded
+ * photo), kept for this browser tab: a page that reloads (a phone waking up, the camera
+ * closing) puts it back. Never needed for the app to work.
+ */
+export function readDraft(key: string): Record<string, unknown> {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_PREFIX + key);
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveDraft(key: string, value: Record<string, unknown>): void {
+  try {
+    if (Object.keys(value).length === 0) sessionStorage.removeItem(DRAFT_PREFIX + key);
+    else sessionStorage.setItem(DRAFT_PREFIX + key, JSON.stringify(value));
+  } catch {
+    /* storage unavailable: the draft only lives as long as the page */
   }
 }
 

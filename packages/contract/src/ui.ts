@@ -263,6 +263,53 @@ export interface StopwatchNode {
   stopLabel?: string;
 }
 
+/** One round of a `quick-rounds` node. */
+export interface QuickRound {
+  /** What to react to; `color` (#rrggbb) colours the text. */
+  prompt: { text: string; color?: string };
+  /** The buttons; `color` (#rrggbb) gives a button a swatch. */
+  options: { id: string; label: string; color?: string }[];
+}
+
+/**
+ * A burst of short rounds played on the device at full speed (e.g. Color Match): every round
+ * shows a prompt and a few buttons, and the player taps one before the round's time runs out;
+ * the next round follows at once. Timed on the device like `stopwatch`, so the network adds
+ * no delay between rounds. Start sends the live action `{ [name]: 'start' }`; the module deals
+ * the rounds in `onAction` (a new `runId`), the device counts down and plays them, then submits
+ * `{ [name]: { runId, answers: [{ choice: optionId | null, ms }] } }` (null: time ran out).
+ */
+export interface QuickRoundsNode {
+  type: 'quick-rounds';
+  /** Payload key of the start action and the submitted answers. */
+  name: string;
+  /** Changes every time the module deals new rounds; null before the first deal. */
+  runId: string | null;
+  rounds: QuickRound[];
+  secondsPerRound: number;
+  startLabel?: string;
+  /**
+   * Start buttons to choose from instead of one (e.g. a level, with what it means in
+   * `detail`): the start action then carries the choice, `{ [name]: 'start', choice: id }`.
+   */
+  choices?: { id: string; label: string; detail?: string }[];
+}
+
+/**
+ * A sentence with blanks and everyone's entries rolling through them, one entry at a time
+ * (results presentations). Every blank is as wide as its longest entry, so the sentence stays
+ * still while a new `index` drops the next entry in.
+ */
+export interface SpoolNode {
+  type: 'spool';
+  /** The sentence around the blanks: a blank between every two parts (`parts.length - 1` blanks). */
+  parts: string[];
+  /** The words for every blank, per entry; `by` is shown under the sentence. */
+  entries: { blanks: string[]; by?: string }[];
+  /** The entry shown now. */
+  index: number;
+}
+
 /**
  * An answer the player can change at any time, without submitting: every change is sent at
  * once as the live action `{ [action]: { id, value } }` (the module's `onAction`). Shown as a
@@ -383,7 +430,9 @@ export type UINode =
   | StopwatchNode
   | LiveAnswerNode
   | DistributionNode
-  | BlobFieldNode;
+  | BlobFieldNode
+  | QuickRoundsNode
+  | SpoolNode;
 
 export type InputNode = ChoicesInputNode | NumberInputNode | TextInputNode | SliderInputNode | ToggleInputNode | FileInputNode;
 
@@ -530,6 +579,15 @@ export const ui = {
     columns,
     ...opts,
   }),
+  quickRounds: (name: string, runId: string | null, rounds: QuickRound[], secondsPerRound: number, opts: Pick<QuickRoundsNode, 'startLabel' | 'choices'> = {}): QuickRoundsNode => ({
+    type: 'quick-rounds',
+    name,
+    runId,
+    rounds,
+    secondsPerRound,
+    ...opts,
+  }),
+  spool: (parts: string[], entries: SpoolNode['entries'], index: number): SpoolNode => ({ type: 'spool', parts, entries, index }),
   blobField: (fieldId: string, mode: BlobFieldNode['mode'], grid: { cols: number; rows: number; cells: string }, blobs: BlobSpec[]): BlobFieldNode => ({
     type: 'blob-field',
     fieldId,

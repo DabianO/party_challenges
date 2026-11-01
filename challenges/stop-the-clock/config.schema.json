@@ -7,32 +7,30 @@
       "description": "Players try to stop the clock at exactly this time.",
       "minimum": 1,
       "maximum": 600,
-      "default": 35
+      "default": 10
     },
-    "hideAfterSeconds": {
-      "type": "number",
-      "title": "Hide the clock after (seconds)",
-      "description": "The running time disappears after this. 0 = never shown; a value at or above the target keeps it visible the whole time.",
-      "minimum": 0,
-      "maximum": 600,
-      "default": 5
+    "maxPoints": {
+      "type": "integer",
+      "title": "Points for a perfect stop",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 10
     },
-    "maxPoints": { "type": "integer", "title": "Points for a perfect stop", "minimum": 1, "maximum": 1000, "default": 10 },
     "fullPointsMs": {
       "type": "integer",
       "title": "Full points within (ms)",
       "description": "Stops this close to the target (early or late) earn the maximum.",
       "minimum": 0,
-      "maximum": 10000,
-      "default": 50
+      "maximum": 1000,
+      "default": 10
     },
     "zeroPointsMs": {
       "type": "integer",
       "title": "No points from (ms off)",
       "description": "Stops this far off or more earn 0 points. In between, one point less per equal step.",
-      "minimum": 100,
-      "maximum": 60000,
-      "default": 2000
+      "minimum": 50,
+      "maximum": 10000,
+      "default": 500
     }
   }
 }

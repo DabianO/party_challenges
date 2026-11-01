@@ -50,7 +50,7 @@ function answer(state: State, ctx: InstanceContext, who: PlayerRef, id: string, 
 
 describe('rivalries', () => {
   it('has a consistent manifest: a Hot Take scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'rivalries', version: '1.0.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
+    expect(mod.manifest).toMatchObject({ id: 'rivalries', version: '1.1.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -173,5 +173,21 @@ describe('rivalries', () => {
     expect(JSON.stringify(results.ui)).not.toContain('You:');
     // No points configured: answering is just for fun.
     expect(mod.calculateScores(mod.createInstance(config, ctx), evaluation, ctx).every((s) => s.points === 0)).toBe(true);
+  });
+
+  it('puts every statement on one presentation slide', () => {
+    const { ctx } = fakeCtx([ada, bea]);
+    let state = mod.createInstance(config, ctx);
+    const slides = mod.presentation!(state, [], ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(1);
+    const grid = slides[0]!.steps[0]!;
+    expect(grid).toMatchObject({ type: 'grid', columns: config.statements.length });
+    expect((grid as { children: unknown[] }).children).toHaveLength(config.statements.length);
+    // The same picture as the spotlight: how the room answered, never who.
+    state = answer(state, ctx, ada, 's0', 1);
+    const json = JSON.stringify(mod.presentation!(state, [], ctx));
+    expect(json).toContain(JSON.stringify(mod.spotlight!(state, ctx)[0]!.ui));
+    expect(json).not.toContain('Ada');
   });
 });

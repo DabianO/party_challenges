@@ -110,7 +110,9 @@ async function main(): Promise<void> {
   );
   await add('closest-number', { question: 'How many golf balls fit in the jar?', correctAnswer: 137, timeLimit: 30, scoring: 'ranked' }, { title: 'The golf ball jar' });
   await add('timed-reaction', { minDelaySeconds: 2, maxDelaySeconds: 6, windowSeconds: 4, maxPoints: 10 }, { title: 'Fastest finger', allowReplay: true });
-  await add('stop-the-clock', { targetSeconds: 35, hideAfterSeconds: 5, maxPoints: 10, fullPointsMs: 50, zeroPointsMs: 2000 }, { title: 'Stop at 35 seconds', allowReplay: true });
+  await add('stop-the-clock', { targetSeconds: 10, maxPoints: 10, fullPointsMs: 10, zeroPointsMs: 500 }, { title: 'Stop at 10 seconds', allowReplay: true });
+  await add('time-estimation', { targetSeconds: 45, maxPoints: 10, fullPointsMs: 500, zeroPointsMs: 10000 }, { title: 'Count to 45' });
+  await add('color-match', { rounds: 10 }, { title: 'Color match' });
   await add('image-memory', { image: media.ref, viewSeconds: 8, question: 'How many red squares were there?', options: ['3', '4', '5', '6'], correctIndex: 1, answerSeconds: 15 }, { title: 'Look closely' });
   await add('caption-this', { image: media.ref, prompt: 'Caption this masterpiece', timeLimit: 90, points: 10 }, { title: 'Caption the art' });
   await add('photo-hunt', { task: 'Take a photo of something red in the room', timeLimit: 180, points: 10 }, { title: 'Red alert' });
@@ -118,6 +120,12 @@ async function main(): Promise<void> {
   await add('blob-war', { points: 10, tapsToMax: 150, maxShare: 0.2 }, { title: 'Blob war' });
   await add('group-message', { prompt: 'Write a birthday message for Dabian', wordsPerTurn: 3, visibleWords: 35, turnSeconds: 300, maxTurnsPerPlayer: 10, pointsPerTurn: 1 }, { title: 'Birthday message' });
   await add('secret-word', { maxPoints: 10, pointsPerWord: 2 }, { title: 'Secret words' });
+  await add('selfiemotion', { timeLimit: 120, points: 5 }, { title: 'Selfiemotion' });
+  await add(
+    'fill-in-the-blanks',
+    { sentences: [{ text: 'The best thing about this party is ___.' }, { text: '___ and ___ walk into a bar.' }], pointsPerSentence: 2, showNames: true },
+    { title: 'Fill in the blanks' },
+  );
   await add('report-score', { prompt: 'How many points did you score at darts?', maxPoints: 20, penalty: 5 }, { title: 'Darts' });
   const hot = { category: 'Hot Takes' };
   await add('sliding-scales', { statements: [{ text: 'Maximum acceptable shower time', min: 0, max: 60, step: 1, unit: 'minutes' }, { text: 'Ideal number of pets', min: 0, max: 5 }] }, { title: 'Sliding scales', ...hot });

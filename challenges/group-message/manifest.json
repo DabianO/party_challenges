@@ -1,9 +1,9 @@
 {
   "id": "group-message",
   "name": "Group Message",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "apiVersion": "2",
-  "category": "social",
+  "category": "creativity",
   "description": "Write a message together, a few words at a time. One player at a time sees the end of the message and adds to it.",
   "players": { "min": 1, "max": null },
   "duration": { "typicalSeconds": 60 },

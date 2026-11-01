@@ -7,10 +7,15 @@
  * A turn that is not used within `turnSeconds` moves on by itself. Each player contributes at
  * most `maxTurnsPerPlayer` times.
  *
+ * The turn goes strictly round the group, whether or not a player's phone is connected right
+ * now: a phone on stand-by gets its turn as soon as it wakes up, and when it does not wake up
+ * in time, the turn moves on to the next in line. The big screen's top bar shows whose turn
+ * it is (`displayBanner`), so players who put their phone away know when to pick it up.
+ *
  * Every contribution is its own attempt (`attempts: "repeat"`): the engine scores each one
  * and adds the points up; `canStart` tells the engine whose turn it is.
  */
-import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -49,6 +54,8 @@ interface State {
   counts: Record<string, number>;
   /** The most recent turn holder (rotation continues after them). */
   lastHolder: string | null;
+  /** The challenge is open (absent before 1.3: open while someone holds the turn). */
+  open?: boolean;
 }
 
 interface Input {
@@ -75,6 +82,33 @@ function messageOf(state: State): string {
   return [state.config.openingText ?? '', ...state.contributions.map((c) => c.text)].map((s) => s.trim()).filter(Boolean).join(' ');
 }
 
+/** Words per presentation slide: aimed for, at least (when looking for a sentence end) and at most (to avoid a tiny last slide). */
+const PAGE_WORDS = 45;
+const PAGE_MIN = 25;
+const PAGE_MAX = 60;
+
+/** The message in readable parts, ending at a sentence end where one is near. */
+function pagesOf(words: string[]): string[][] {
+  const pages: string[][] = [];
+  let i = 0;
+  while (i < words.length) {
+    if (words.length - i <= PAGE_MAX) {
+      pages.push(words.slice(i));
+      break;
+    }
+    let end = i + PAGE_WORDS;
+    for (let j = i + PAGE_WORDS; j >= i + PAGE_MIN; j--) {
+      if (/[.!?…]["'”’)]*$/.test(words[j - 1]!)) {
+        end = j;
+        break;
+      }
+    }
+    pages.push(words.slice(i, end));
+    i = end;
+  }
+  return pages;
+}
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
@@ -84,9 +118,11 @@ function nameOf(players: PlayerRef[], id: string): string {
 }
 
 /**
- * Give the turn to the next player: connected players first (a phone that is off would waste
- * the whole turn), then whoever was offered the fewest turns, then the join order after the
- * previous holder. Players who reached their maximum are skipped.
+ * Give the turn to the next player in line: never the previous holder twice in a row while
+ * someone else can still write, then whoever was offered the fewest turns, then the join order
+ * after the previous holder. Players who reached their maximum are skipped. Whether their
+ * phone is connected does not matter: a sleeping phone gets the turn when it wakes up, and
+ * the turn moves on after `turnSeconds` if it does not.
  */
 function assignNextTurn(state: State, ctx: InstanceContext, previous: string | null): State {
   const players = ctx.players();
@@ -103,7 +139,6 @@ function assignNextTurn(state: State, ctx: InstanceContext, previous: string | n
   const repeatPenalty = (id: string) => (id === previous && eligible.length > 1 ? 1 : 0);
   const next = [...eligible].sort(
     (a, b) =>
-      Number(!a.connected) - Number(!b.connected) ||
       repeatPenalty(a.id) - repeatPenalty(b.id) ||
       (state.offered[a.id] ?? 0) - (state.offered[b.id] ?? 0) ||
       rotation(a.id) - rotation(b.id),
@@ -131,10 +166,10 @@ export default defineModule<Config, State, Input, Evaluation>({
   },
 
   onPhaseChange(state, phase, ctx) {
-    if (phase === 'ACTIVE') return state.turn ? state : assignNextTurn(state, ctx, state.lastHolder);
+    if (phase === 'ACTIVE') return state.turn ? { ...state, open: true } : assignNextTurn({ ...state, open: true }, ctx, state.lastHolder);
     // Hidden again, closed or finished: nobody holds the turn.
     ctx.cancel('turn');
-    return state.turn ? { ...state, turn: null } : state;
+    return { ...state, turn: null, open: false };
   },
 
   onTimer(state, tag, ctx, playerId) {
@@ -223,6 +258,31 @@ export default defineModule<Config, State, Input, Evaluation>({
       canSubmit: true,
       status: `Up to ${plural(c.wordsPerTurn, 'word')} — then it is the next player's turn`,
     };
+  },
+
+  displayBanner(state, ctx) {
+    // Whose turn it is, in the big screen's top bar: players who put their phone away know when to pick it up.
+    if (!(state.open ?? state.turn !== null) || !state.turn) return null;
+    const name = ctx.players().find((p) => p.id === state.turn!.playerId)?.displayName ?? state.turn.displayName;
+    return `✍️ ${name}'s turn to write: open your phone`;
+  },
+
+  presentation(state): PresentationSlide[] {
+    const pages = pagesOf(wordsOf(messageOf(state)));
+    return pages.map((page, i) => ({
+      caption: pages.length > 1 ? `Part ${i + 1} of ${pages.length}` : undefined,
+      steps: [
+        ui.stack(
+          [
+            ...(i === 0 ? [ui.subtitle(state.config.prompt, { align: 'center', tone: 'muted' })] : []),
+            ui.title(`${i > 0 ? '… ' : ''}${page.join(' ')}${i < pages.length - 1 ? ' …' : ''}`, { align: 'center' }),
+          ],
+          { gap: 'lg', align: 'center' },
+        ),
+      ],
+      // Time to read it out loud.
+      stepSeconds: Math.max(8, Math.round(page.length * 0.5)),
+    }));
   },
 
   resultsView(state, evaluations) {

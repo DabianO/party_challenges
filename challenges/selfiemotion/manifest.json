@@ -1,0 +1,20 @@
+{
+  "id": "selfiemotion",
+  "name": "Selfiemotion",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "creativity",
+  "description": "You get a random emoji: recreate it with a selfie. Pull the face, find the props, get the light right.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 120 },
+  "capabilities": ["camera", "evidence-upload", "image", "timer", "statistics"],
+  "evaluation": {
+    "mode": "peer",
+    "supportedModes": ["automatic", "peer", "host", "hybrid"],
+    "criteria": "Approve if the selfie is a real attempt at the emoji: the face (and any props) should remind you of it. Automatic: every selfie counts.",
+    "evidence": { "kind": "image", "field": "photo", "label": "Selfie" },
+    "hostScoring": { "min": 0, "max": 10, "step": 1 }
+  },
+  "results": "immediate",
+  "resubmission": "none"
+}

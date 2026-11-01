@@ -20,8 +20,29 @@
     "customWords": {
       "type": "string",
       "title": "Your own words (optional)",
-      "description": "One per line or separated by commas. Replaces the built-in list of about 1,400 English words. Make it at least players × words long, or some players will share words.",
+      "description": "One per line or separated by commas. Below: use them instead of the built-in list of about 1,400 English words, or together with it. Instead: make it at least players × words long, or some players will share words.",
       "maxLength": 20000
+    },
+    "customWordsUse": {
+      "type": "string",
+      "title": "Use your words",
+      "enum": [
+        "replace",
+        "add"
+      ],
+      "enumNames": [
+        "Instead of the built-in list",
+        "Together with the built-in list"
+      ],
+      "default": "replace"
+    },
+    "customWordsChance": {
+      "type": "integer",
+      "title": "Chance the next word is one of yours (%)",
+      "description": "Together with the built-in list: how likely each new word comes from your words (while some are left). 100 = all of yours first, then the built-in ones.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 50
     }
   }
 }

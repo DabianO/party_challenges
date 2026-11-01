@@ -15,7 +15,7 @@ export const CONTRACT_API_VERSION = '2';
 
 export type JsonSchema = Record<string, unknown>;
 
-export type ModuleCategory = 'knowledge' | 'skill' | 'social' | 'memory' | 'chaos' | 'other';
+export type ModuleCategory = 'knowledge' | 'skill' | 'social' | 'memory' | 'creativity' | 'chaos' | 'other';
 
 export type Capability =
   | 'timer'
@@ -87,6 +87,11 @@ export interface Manifest {
   /** Pre-filled as the challenge's category when the host adds it (e.g. "Hot Takes"). */
   suggestedCategory?: string;
   /**
+   * Replays start switched on when the host adds the challenge (they can still switch them
+   * off): playing again to beat your own best is the point (`immediate` results only).
+   */
+  suggestedReplay?: boolean;
+  /**
    * Id of the module that replaces this one. The host's library no longer offers it, but
    * games and setup files that use it keep working.
    */
@@ -105,6 +110,22 @@ export interface SpotlightItem {
   ui: UINode;
   /** Grows with every new or changed answer; the display shows the busiest item next. */
   activity: number;
+}
+
+/**
+ * One slide of the big screen's results presentation (see `ChallengeModule.presentation`).
+ * The host moves through the steps one by one (or lets them play), then on to the next slide.
+ * Most slides have one step; more steps change part of the slide in place, e.g. the entries
+ * rolling through a sentence (`ui.spool`): give the nodes that stay the same position in every
+ * step so they stay put and animate.
+ */
+export interface PresentationSlide {
+  /** Small heading above the slide, e.g. "Sentence 2 of 5" (the challenge title is always shown). */
+  caption?: string;
+  /** What the slide shows, one node per step; at least one. */
+  steps: UINode[];
+  /** How long each step stays on screen while the presentation plays by itself (default 10). */
+  stepSeconds?: number;
 }
 
 /**
@@ -337,15 +358,28 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   /**
    * Optional live panel for the big screen, shown next to the race graph while the instance
    * is open and as the closing picture once it is closed or the game ended (e.g. a
-   * `blob-field`). Everyone in the room sees it: must not leak answers (MR-9).
+   * `blob-field`). Everyone in the room sees it: must not leak answers (MR-9). Return null for
+   * nothing to show right now.
    */
-  displayPanel?(state: State, ctx: InstanceContext): UINode;
+  displayPanel?(state: State, ctx: InstanceContext): UINode | null;
+  /**
+   * Optional short line for the big screen's top bar while the instance is open, e.g.
+   * "✍️ Bea's turn to write: open your phone". Everyone sees it (MR-9). Null for nothing.
+   */
+  displayBanner?(state: State, ctx: InstanceContext): string | null;
   /**
    * Optional items for the big screen's spotlight, which shows one item a minute from every
    * open instance that has any: the one with the most new answers since it was last shown,
    * every item once before any repeats. Everyone sees it: aggregate answers only (MR-9).
    */
   spotlight?(state: State, ctx: InstanceContext): SpotlightItem[];
+  /**
+   * Optional slides for the big screen's results presentation, which the host runs once the
+   * challenge is closed (e.g. every caption, or every statement and how the room answered).
+   * Shown while points are still hidden from the room: no points or rankings on slides.
+   * Receives the same evaluations as `resultsView`. Return [] for nothing to show.
+   */
+  presentation?(state: State, evaluations: Evaluation[], ctx: InstanceContext): PresentationSlide[];
   /** Results over all evaluations so far; `guestUi` personalises them. */
   resultsView(state: State, evaluations: Evaluation[], ctx: InstanceContext): ResultsViewModel;
 }

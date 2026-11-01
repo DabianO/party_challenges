@@ -32,6 +32,10 @@ Run a subset: `npx vitest run packages/engine`, `npx vitest run challenges/capti
 
 Before committing, `npm run typecheck` and `npm test` must both pass.
 
+For a real party, serve the built client (`npm run build` + `npm start`): in dev, Vite's client
+reloads a phone's page whenever its own connection drops (stand-by, opening the camera). Challenge
+screens keep unsent input in `sessionStorage` (`UIView` `draftKey`) so a reload loses nothing.
+
 If port 5173 is taken, run Vite elsewhere and tell the server so QR/join URLs match:
 `PUBLIC_PORT=5174 npm run dev:server` plus `npm exec -w @challenge/web -- vite --port 5174 --strictPort`.
 (`npm run dev:web -- --port …` does not forward flags through the nested `npm run`.)
@@ -72,6 +76,11 @@ TypeScript runs directly via `tsx` (no build step for backend packages). Imports
   `inst.category` (host-entered, '' = none) groups players' boards; not the manifest `category`.
 - **Spotlight:** module `spotlight` items (Hot Takes statements) take turns on the big screen,
   one a minute (`spotlight.ts` picks, runtime `updateSpotlight` runs the timer, `doc.spotlight`).
+- **Results presentation:** closed challenges' module `presentation` slides on the big screen,
+  run by the host (`start-presentation` / `move-presentation` / `autoplay-presentation`, also on
+  a finished game). Position and autoplay timer live in runtime memory, not in the document
+  (`presentation.ts` moves through the running order); slides never carry points. Its changes
+  go to host and main only (`commitScreens`), so steps stay on time with many phones connected.
 - **Hidden results:** games start with `resultsRevealed = false`; non-host snapshots then
   carry no points, ranks or results (masked in `snapshotFor`/`boardEntry`). Host action
   `reveal-results` / `hide-results`. The big screen instead shows `doc.standings`, a frozen

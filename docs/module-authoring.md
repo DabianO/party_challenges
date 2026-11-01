@@ -69,7 +69,7 @@ Consequences for module code:
 |---|---|
 | `id`, `version` | kebab-case id; `id@version` identifies a build; games pin the exact version. A game whose pinned version is no longer installed moves up to the newest installed version **with the same major**, so minor/patch releases must keep `State` and `Config` compatible; bump the major for anything else. |
 | `apiVersion` | Must be `"2"`. The loader refuses anything else. |
-| `category` | `knowledge`, `skill`, `social`, `memory`, `chaos`, `other`. |
+| `category` | `knowledge`, `skill`, `social`, `memory`, `creativity`, `chaos`, `other`. |
 | `evaluation.mode` | `automatic` (your `evaluate()` decides), `peer` (another player approves/rejects), `host` (host queue), `hybrid` (peers first, rejections go to the host). |
 | `evaluation.supportedModes` | Every mode the module can run in. Hosts may pick any of these per game or per instance (FR-70). Defaults to `[mode]`. |
 | `evaluation.criteria` | Required for non-automatic modes: what a judge should check (MR-17). |
@@ -80,6 +80,7 @@ Consequences for module code:
 | `resubmission` | `none` (default: submitting locks the attempt) or `replace` (a client may replace the answer until the timer fires or it sends FINISH). The web client always locks on the first submit (`final: true`), so design `guestView` around a single submit. |
 | `attempts` | `once` (default; the host may still enable best-of replays) or `repeat`: taking part repeatedly *is* the challenge. Players may always start a new attempt, every attempt is scored and the points add up; gate who may start with `canStart`. `immediate` results only. Examples: `group-message`, `secret-word`, `report-score`. After a repeat attempt locks, a player who may start again straight away is offered to continue on the same screen. |
 | `suggestedCategory` | Optional, at most 40 characters: pre-filled as the challenge's category when the host adds it (e.g. `"Hot Takes"`). The host can change it. |
+| `suggestedReplay` | Optional `true`: replays start switched on when the host adds the challenge (best try counts; the host can switch them off). For challenges where playing again to beat your own score is the point (`color-match`). `immediate` results only. |
 | `supersededBy` | Optional module id that replaces this one. The host's library stops offering the module; games and setup files that use it keep working. Keep the module installed. |
 | `capabilities` | Declare everything you use (`timer`, `image`, `text-input`, `numeric-input`, `multiple-choice`, `evidence-upload`, `statistics`, …). |
 
@@ -163,7 +164,17 @@ evaluated → scored.
    `ui.stopwatch('clock', { hideAfterSeconds })` is timed on the phone itself: Start sends
    the live action `{ clock: 'start' }`, Stop submits `{ clock: elapsedMs }` measured between
    the two touches, so Wi-Fi delay does not count. Note the server time in `onAction` and
-   compare it with the submission to catch implausible times. Example: `stop-the-clock`.
+   compare it with the submission to catch implausible times. Examples: `stop-the-clock`
+   (the time visible all the way), `time-estimation` (`hideAfterSeconds: 0`: no clock at all).
+   `ui.quickRounds(name, runId, rounds, secondsPerRound)` plays a burst of short timed rounds
+   on the phone (a prompt, a few buttons, the next round at once): Start sends the live action
+   `{ [name]: 'start' }`, you deal the rounds in `onAction` under a new `runId`, the phone
+   counts down (under 3 s), plays them and submits `{ [name]: { runId, answers: [{ choice, ms
+   }] } }` (`choice` null when time ran out). Check the `runId` in `validateInput`, and check
+   the server's time from the deal to the submission against what the rounds allow (allow
+   ~250 ms per round between rounds). With `choices: [{ id, label, detail }]` the phone shows
+   one start button per choice instead (e.g. levels, with what each means in `detail`), and the
+   start action carries it: `{ [name]: 'start', choice: id }`. Example: `color-match`.
 1f. **`displayPanel(state, ctx)`** (optional) is a live panel for the big screen, shown next
    to the race graph while the instance is open and as the closing picture after it closes
    or the game ends. Everyone sees it, so never leak answers. `ui.blobField(fieldId, 'live' |
@@ -172,6 +183,11 @@ evaluated → scored.
    names its `slot`, `color` (#rrggbb), `label`, `share` and an optional `pulse` counter
    (a glow when it rises). Live it is drawn as embossed liquid that flows between snapshots;
    final as a gapless picture with every share (empty cells join the nearest territory).
+   Return null when there is nothing to show (`fill-in-the-blanks` shows the latest sentence
+   while it is open, a new one a minute from its own instance timer, and nothing once closed).
+   Panels with a picture (a `blob-field`) come first on the screen, other panels underneath.
+   **`displayBanner(state, ctx)`** (optional) returns one short line for the big screen's top
+   bar while the instance is open, or null: `group-message` shows whose turn it is there.
 1g. **`spotlight(state, ctx)`** (optional) returns items for the big screen's spotlight:
    `{ id, ui, activity }[]`, e.g. one per statement with how the room answered it. The engine
    shows one item a minute from all open instances that have any: every item once per round,
@@ -185,6 +201,18 @@ evaluated → scored.
    every change as the live action `{ answer: { id, value } }`, with no submit, so players can
    change their minds until the instance closes. Pair it with `results: "onClose"` and score
    from state, like the Hot Takes modules.
+1i. **`presentation(state, evaluations, ctx)`** (optional) returns slides for the results
+   presentation the host runs on the big screen once the challenge is closed (`RESULTS`):
+   `{ caption?, steps: UINode[], stepSeconds? }[]`. The host moves through the steps one by one
+   (or lets them play, `stepSeconds` each, default 10), then on to the next slide. Most slides
+   have one step; more steps change part of the slide in place, e.g. `ui.spool(parts,
+   entries, index)`: a sentence with everyone's entries rolling through its blanks, one entry
+   per step (every blank as wide as its longest entry, so the sentence stays still). Slides
+   are shown while points are still hidden: no points or rankings on them. The big screen
+   shrinks a slide that does not fit, so one slide may hold many items (`ui.grid`). Examples:
+   `fill-in-the-blanks` (spool), `selfiemotion` (four per slide), `group-message` (the
+   message in readable parts), `blob-war` (the closing picture), the Hot Takes modules (every
+   statement on one slide). Return `[]` when there is nothing to show.
 1h. **`onPlayerJoin(state, player, ctx)`** (optional) runs for every ACTIVE instance when a
    new player joins the game, before they start anything, e.g. to give them a place on a
    shared field right away.
@@ -228,6 +256,8 @@ evaluated → scored.
   with one bounded exception: a `ui.stopwatch` time is more precise than any server
   measurement over Wi-Fi, so `stop-the-clock` accepts it only when it lies within 750 ms of
   the server's own measurement (start action → submission) and uses the server's time otherwise.
+  `ui.quickRounds` answer times are the same kind of exception: `color-match` refuses a try
+  that took the server longer than its rounds allow.
 - Player names come from `ctx.players()`; store `displayName` in evaluation rows so
   `resultsView` can render without a roster lookup.
 - Colour players with `player.color` (#rrggbb, from `ctx.players()` or the `PlayerRef` you
@@ -251,6 +281,8 @@ Views return trees of UI nodes built with the `ui` helpers from `@challenge/cont
 | `ui.numberInput(name, {...})`, `ui.textInput(name, {...})`, `ui.slider(name,min,max)`, `ui.toggle(name,label)` | inputs |
 | `ui.fileInput(name, {accept, capture, label})` | evidence upload; the payload gets a `media://` ref (§14.6) |
 | `ui.submit(label, {payload, size, tone})` | submit button; `payload` is merged into the form fields |
+| `ui.stopwatch(name, {hideAfterSeconds})`, `ui.quickRounds(name, runId, rounds, secondsPerRound)` | timed on the phone (see live actions) |
+| `ui.spool(parts, entries, index)` | presentation slides: entries rolling through a sentence's blanks |
 
 Inputs are collected by `name` into one payload object; that object is what your
 `validateInput`/`handleInput` receive as `Input`. A `guestView` returns

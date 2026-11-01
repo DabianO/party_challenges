@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "required": ["sentences"],
+  "properties": {
+    "sentences": {
+      "type": "array",
+      "title": "Sentences",
+      "description": "Write ___ (three underscores) where players fill something in; a sentence can have several blanks. Without one, the blank goes at the end.",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "title": "sentence",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Sentence",
+            "description": "e.g. \"The best thing about this party is ___.\"",
+            "minLength": 4,
+            "maxLength": 300
+          }
+        }
+      }
+    },
+    "pointsPerSentence": {
+      "type": "integer",
+      "title": "Points per completed sentence",
+      "description": "A sentence counts when all its blanks are filled in.",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 2
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "description": "Per player, from the moment they press Start.",
+      "maximum": 1800,
+      "default": 0,
+      "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 30 }]
+    },
+    "showNames": {
+      "type": "boolean",
+      "title": "Show who wrote what",
+      "description": "In the presentation on the big screen, under each entry. Players can still choose to stay anonymous.",
+      "default": true
+    }
+  }
+}

@@ -22,7 +22,7 @@
  * and fights by activity; v1.3 keeps every blob one visible piece. Older state is upgraded on
  * first use.
  */
-import { blobCells, defineModule, playerColor, ui, type Manifest, type PlayerRef } from '@challenge/contract';
+import { blobCells, defineModule, playerColor, ui, type BlobFieldNode, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 import {
@@ -285,6 +285,29 @@ function standings(state: State, players: PlayerRef[]): Evaluation['shares'] {
     .sort((a, b) => b.share - a.share || a.displayName.localeCompare(b.displayName));
 }
 
+/** The room as a blob field: live while open, the closing picture once closed. */
+function blobFieldOf(raw: State, ctx: InstanceContext): BlobFieldNode {
+  const players = ctx.players();
+  const state = upgrade(raw, players);
+  const owners = decode(state.cells);
+  // Territory of players who left is shown as open space.
+  const present = new Set(players.map((p) => state.colors[p.id]).filter((s): s is number => s !== undefined));
+  releaseAbsent(owners, present);
+  const areas = areasOf(owners);
+  return ui.blobField(
+    ctx.instanceId,
+    state.closed ? 'final' : 'live',
+    { cols: COLS, rows: ROWS, cells: encode(owners) },
+    players
+      .filter((p) => state.colors[p.id] !== undefined)
+      .map((p) => {
+        const slot = state.colors[p.id]!;
+        // The player's own colour, the same as in the graphs and everywhere else.
+        return { id: p.id, slot, color: p.color ?? colorFor(slot), label: p.displayName, share: (areas.get(slot) ?? 0) / TOTAL, pulse: state.taps[p.id] ?? 0 };
+      }),
+  );
+}
+
 export default defineModule<Config, State, Action, Evaluation>({
   manifest: manifestJson as unknown as Manifest,
   configurationSchema: schemaJson,
@@ -384,25 +407,18 @@ export default defineModule<Config, State, Action, Evaluation>({
   },
 
   displayPanel(raw, ctx) {
-    const players = ctx.players();
-    const state = upgrade(raw, players);
-    const owners = decode(state.cells);
-    // Territory of players who left is shown as open space.
-    const present = new Set(players.map((p) => state.colors[p.id]).filter((s): s is number => s !== undefined));
-    releaseAbsent(owners, present);
-    const areas = areasOf(owners);
-    return ui.blobField(
-      ctx.instanceId,
-      state.closed ? 'final' : 'live',
-      { cols: COLS, rows: ROWS, cells: encode(owners) },
-      players
-        .filter((p) => state.colors[p.id] !== undefined)
-        .map((p) => {
-          const slot = state.colors[p.id]!;
-          // The player's own colour, the same as in the graphs and everywhere else.
-          return { id: p.id, slot, color: p.color ?? colorFor(slot), label: p.displayName, share: (areas.get(slot) ?? 0) / TOTAL, pulse: state.taps[p.id] ?? 0 };
-        }),
-    );
+    return blobFieldOf(raw, ctx);
+  },
+
+  presentation(raw, _evaluations, ctx): PresentationSlide[] {
+    const field = blobFieldOf(raw, ctx);
+    const top = [...field.blobs].sort((a, b) => b.share - a.share).filter((b) => b.share > 0).slice(0, 5);
+    return [
+      {
+        steps: [ui.stack([field, ui.caption(top.map((b) => `${b.label} ${pct(b.share)}`).join(' · '), { align: 'center' })], { gap: 'md', align: 'stretch' })],
+        stepSeconds: 15,
+      },
+    ];
   },
 
   guestView(raw, player, ctx) {

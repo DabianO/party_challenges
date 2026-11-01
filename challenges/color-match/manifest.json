@@ -1,0 +1,15 @@
+{
+  "id": "color-match",
+  "name": "Color Match",
+  "version": "1.1.0",
+  "apiVersion": "2",
+  "category": "skill",
+  "description": "A colour word appears in another colour, e.g. BLUE written in red. Tap the colour of the letters, not the word itself, before the time runs out. Pick level 1, 2 or 3 every time you play (more colours, less time, more points); new words every try, and your best try counts.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 45 },
+  "capabilities": ["timer", "real-time-burst", "multiple-choice", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none",
+  "suggestedReplay": true
+}

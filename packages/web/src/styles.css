@@ -3567,9 +3567,6 @@ body.has-bg-image .challenge-top {
   height: 100%;
   background: var(--accent);
   transform-origin: left;
-  animation-name: spotlight-time;
-  animation-timing-function: linear;
-  animation-fill-mode: both;
 }
 @keyframes spotlight-time {
   from {
@@ -3778,5 +3775,380 @@ body.has-bg-image .challenge-top {
   }
   .judge-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Results presentation (big screen) and its host controls
+   ========================================================================== */
+.presentation {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.presentation-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.presentation-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.presentation-title {
+  margin: 0;
+  font-size: clamp(1.6rem, 3.4vw, 2.8rem);
+  font-weight: 800;
+  line-height: 1.1;
+}
+.presentation-where {
+  flex: none;
+  color: var(--text-muted);
+  font-size: clamp(1rem, 1.6vw, 1.4rem);
+}
+.spotlight-time.is-held {
+  visibility: hidden;
+}
+.presentation-body {
+  flex: 1;
+  min-height: 0;
+  animation: slide-in 0.5s ease both;
+}
+.presentation-foot {
+  align-self: flex-end;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Content shrinks (FitToBox) instead of scrolling; centred when it is smaller than the box. */
+.fit-box {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.fit-box-content {
+  flex: none;
+  max-width: none;
+  transform-origin: center center;
+}
+.ui-presentation .ui-image img {
+  border-radius: var(--radius);
+}
+/* A blob field takes the territory grid's shape (112 × 70) instead of filling a panel. */
+.ui-presentation .blob-field {
+  height: auto;
+  aspect-ratio: 16 / 10;
+  width: min(100%, calc(58vh * 1.6));
+  margin: 0 auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+/* Many statements on one slide (Hot Takes): smaller headings per card. */
+.ui-presentation .ui-grid .ui-text-title {
+  font-size: clamp(1.1rem, 1.9vw, 1.7rem);
+}
+
+/* A sentence with entries rolling through its blanks (`spool`). */
+.spool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+  --spool-from: -110%;
+  --spool-to: 110%;
+}
+.spool.is-back {
+  --spool-from: 110%;
+  --spool-to: -110%;
+}
+.spool-sentence {
+  margin: 0;
+  font-size: clamp(1.8rem, 4.2vw, 3.6rem);
+  font-weight: 700;
+  line-height: 1.5;
+  max-width: 28em;
+}
+.spool-blank {
+  display: inline-grid;
+  vertical-align: bottom;
+  overflow: hidden;
+  margin: 0 0.15em;
+  padding: 0 0.25em;
+  border-bottom: 0.08em solid var(--accent-text);
+  line-height: 1.3;
+}
+.spool-blank-plain {
+  border-bottom: none;
+}
+.spool-word {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  white-space: nowrap;
+  color: var(--accent-text);
+}
+.spool-word.is-in {
+  visibility: visible;
+  animation: spool-in 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+.spool-word.is-out {
+  visibility: visible;
+  animation: spool-out 0.45s ease-in both;
+}
+@keyframes spool-in {
+  from {
+    transform: translateY(var(--spool-from));
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes spool-out {
+  from {
+    transform: none;
+    opacity: 1;
+  }
+  to {
+    transform: translateY(var(--spool-to));
+    opacity: 0;
+  }
+}
+/* The latest sentence in a big-screen panel (a quarter of the screen). */
+.race-panel .spool-sentence {
+  font-size: clamp(1.1rem, 2.2vw, 2.2rem);
+}
+.race-panel .spool-by {
+  font-size: clamp(0.9rem, 1.3vw, 1.2rem);
+}
+.race-panel .spool {
+  gap: 8px;
+}
+
+/* A challenge's line in the big screen's top bar, e.g. whose turn it is. */
+.header-banner {
+  margin-top: 6px;
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  border: 1px solid var(--accent);
+  font-weight: 700;
+  font-size: clamp(0.95rem, 1.5vw, 1.35rem);
+  animation: header-banner-in 0.5s ease-out both;
+}
+.header-banner-title {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+@keyframes header-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.spool-by {
+  margin: 0;
+  font-size: clamp(1.1rem, 2vw, 1.7rem);
+}
+.spool-by .spool-word {
+  color: var(--text-muted);
+}
+.spool-count {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: clamp(0.9rem, 1.4vw, 1.2rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.presentation-panel {
+  align-items: flex-start;
+}
+.presentation-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.presentation-start,
+.presentation-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.presentation-panel.is-live {
+  border-color: var(--accent);
+  align-items: center;
+}
+.presentation-controls .input-sm {
+  width: auto;
+  max-width: 220px;
+}
+
+/* ==========================================================================
+   Quick rounds (e.g. Color Match): short rounds played on the phone
+   ========================================================================== */
+.quick-rounds {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  min-height: 18rem;
+  justify-content: center;
+}
+.quick-start {
+  align-self: center;
+  min-width: min(70vw, 280px);
+}
+/* One start button per level: what it means right on the button. */
+.quick-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.quick-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 4.6rem;
+  padding: 10px 16px;
+}
+.quick-choice-label {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+.quick-choice-detail {
+  font-size: 0.95rem;
+  font-weight: 500;
+  opacity: 0.9;
+}
+.quick-countdown,
+.quick-done {
+  align-self: center;
+  font-size: clamp(4rem, 30vw, 8rem);
+  font-weight: 900;
+  line-height: 1;
+  animation: quick-pop 0.6s ease-out both;
+}
+.quick-done {
+  font-size: 2rem;
+  color: var(--text-muted);
+}
+@keyframes quick-pop {
+  from {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.quick-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.quick-round-no {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+.quick-time {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.quick-time span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  animation-name: spotlight-time;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+.quick-time span.is-stopped {
+  animation-play-state: paused;
+}
+/* The prompt sits on the same dark card in every theme, so every ink colour reads well. */
+.quick-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 9rem;
+  border-radius: var(--radius);
+  background: #14161d;
+  font-size: clamp(2.6rem, 14vw, 4.2rem);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.quick-options {
+  display: grid;
+  gap: 10px;
+}
+.quick-options.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.quick-options.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.quick-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 4.2rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.quick-option:disabled {
+  cursor: default;
+}
+.quick-option.is-chosen {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 25%, var(--surface));
+}
+.quick-swatch {
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The time bar is information, not decoration: it keeps running. */
+  .quick-time span {
+    animation-duration: var(--round-ms) !important;
   }
 }

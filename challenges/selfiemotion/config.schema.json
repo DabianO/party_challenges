@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "emojis": {
+      "type": "array",
+      "title": "Emojis",
+      "description": "Every player gets one of these at random (as evenly spread as possible).",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "type": "string", "title": "emoji", "minLength": 1, "maxLength": 16 },
+      "default": ["😂", "😱", "😍", "😡", "🤔", "😴", "🥳", "😭", "😎", "🤢", "😇", "🤯", "😏", "🥺", "😬", "🤪", "🧐", "😤", "🤫", "😵‍💫"]
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "description": "Per player, from the moment they press Start.",
+      "maximum": 900,
+      "default": 120,
+      "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 30 }]
+    },
+    "points": {
+      "type": "integer",
+      "title": "Points for a selfie",
+      "description": "For an approved selfie (or every selfie, when nobody judges them). The host may instead score 0–10 points directly.",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 5
+    }
+  }
+}

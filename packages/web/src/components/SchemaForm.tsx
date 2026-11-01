@@ -12,6 +12,8 @@ export interface Prop {
   title?: string;
   description?: string;
   enum?: string[];
+  /** Labels for `enum` values, in the same order (a common JSON Schema extension). */
+  enumNames?: string[];
   default?: unknown;
   minimum?: number;
   maximum?: number;
@@ -57,6 +59,7 @@ export function normaliseProp(raw: unknown): Prop {
     title: str(r.title),
     description: str(r.description),
     enum: Array.isArray(r.enum) ? r.enum.map(String) : undefined,
+    enumNames: Array.isArray(r.enumNames) ? r.enumNames.map(String) : undefined,
     default: r.default,
     minimum: num(r.minimum) ?? num(range?.minimum),
     maximum: num(r.maximum) ?? num(range?.maximum),
@@ -270,9 +273,9 @@ function FieldControl({ prop, value, onChange, upload, id, label, required }: Fi
         return (
           <select id={id} className="input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} required={required}>
             <option value="">— choose —</option>
-            {prop.enum.map((opt) => (
+            {prop.enum.map((opt, i) => (
               <option key={opt} value={opt}>
-                {opt}
+                {prop.enumNames?.[i] ?? opt}
               </option>
             ))}
           </select>
@@ -511,9 +514,9 @@ function CellInput({ id, prop, label, value, onChange }: { id?: string; prop: Pr
     return (
       <select id={id} className="input input-sm" aria-label={label} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)}>
         <option value="">—</option>
-        {prop.enum.map((o) => (
+        {prop.enum.map((o, i) => (
           <option key={o} value={o}>
-            {o}
+            {prop.enumNames?.[i] ?? o}
           </option>
         ))}
       </select>

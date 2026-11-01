@@ -10,7 +10,7 @@
  * `activity` counts new and changed answers so busy statements come first. Optional
  * participation points are awarded when the challenge closes.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type SpotlightItem, type Tone, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type SpotlightItem, type Tone, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -92,6 +92,11 @@ function statementView(state: State, s: { id: string; text: string }, mine?: num
     ],
     { gap: 'md', align: 'stretch' },
   );
+}
+
+/** Columns for `n` statements on one presentation slide, so they all fit. */
+function columnsFor(n: number): number {
+  return n <= 2 ? n : n <= 4 ? 2 : n <= 9 ? 3 : n <= 16 ? 4 : 5;
 }
 
 const INSTRUCTIONS = 'Answer as many as you like and change your mind any time. Go back to the other challenges whenever you want and come back later.';
@@ -203,6 +208,13 @@ export default defineModule<Config, State, unknown, Evaluation>({
 
   spotlight(state): SpotlightItem[] {
     return statementsOf(state).map((s) => ({ id: s.id, label: s.text, activity: state.activity[s.id] ?? 0, ui: statementView(state, s) }));
+  },
+
+  presentation(state): PresentationSlide[] {
+    // Every one on a single slide (the big screen shrinks it to fit).
+    const all = statementsOf(state);
+    if (all.length === 0) return [];
+    return [{ steps: [ui.grid(columnsFor(all.length), all.map((s) => ui.card([statementView(state, s)])), { gap: 'md' })], stepSeconds: Math.min(60, 10 + 3 * all.length) }];
   },
 
   resultsView(state) {

@@ -129,6 +129,7 @@ function Live({ ctx, entry }: { ctx: PlayCtx; entry: BoardEntry }) {
         paused={paused}
         uploadEvidence={ctx.uploadEvidence}
         onAction={onAction}
+        draftKey={`${ctx.snapshot.game.id}:${ctx.meId}:${entry.instanceId}:${entry.attempts}`}
       />
       {entry.statusText && (
         <p className="status-line" role="status">

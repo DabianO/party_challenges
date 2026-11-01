@@ -8,6 +8,7 @@ import { useToast } from '../components/Toast';
 import type { EvidenceUploader } from '../components/UIRenderer';
 import { api } from '../lib/api';
 import { useBranding } from '../lib/branding';
+import { shrinkPhoto } from '../lib/images';
 import { resolveMedia } from '../lib/media';
 import { useGameSocket, type GameSocket } from '../lib/socket';
 import type { PlayerSession } from '../lib/storage';
@@ -102,7 +103,8 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
 
   const uploadEvidence = useCallback<EvidenceUploader>(
     async (file) => {
-      const res = await api.uploadEvidence(code, session.sessionToken, file);
+      // Phone photos are shrunk first: uploaded in a moment, before the connection can drop.
+      const res = await api.uploadEvidence(code, session.sessionToken, await shrinkPhoto(file));
       return { ref: res.ref, url: res.url };
     },
     [code, session.sessionToken],
