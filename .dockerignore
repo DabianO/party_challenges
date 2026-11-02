@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/test
+**/*.test.ts
+**/*.log
+data
+coverage
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+scripts
+docs
+*.md

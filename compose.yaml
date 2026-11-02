@@ -1,0 +1,67 @@
+# Internet hosting: the game server plus a Cloudflare Tunnel (see docs/deployment.md).
+#
+#   npm run party:up      start (builds the image when the code changed)
+#   npm run party:down    stop: the site is offline at once
+#
+# Nothing listens on the internet here. cloudflared makes an outgoing connection to Cloudflare
+# and hands guests' requests to the app's PUBLIC port (8080), which is not published on the
+# laptop at all. The host's controls are on the ADMIN port, published on this laptop only:
+# http://localhost:3000/host
+name: party
+
+services:
+  app:
+    build: .
+    image: party-challenges:local
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      ADMIN_PORT: "3000"
+      # Inside the container; the laptop publishes it on 127.0.0.1 only (ports below).
+      ADMIN_HOST: "0.0.0.0"
+      PUBLIC_URL: "https://${PARTY_HOST:?set PARTY_HOST in .env}"
+      HOST_CREATE_PASSWORD: "${HOST_CREATE_PASSWORD:?set HOST_CREATE_PASSWORD in .env}"
+      DATA_DIR: /data
+      MEDIA_MAX_BYTES: "8388608"
+      MEDIA_MAX_PER_GAME_BYTES: "1073741824"
+    ports:
+      # This laptop only. HOST_PORT in .env when 3000 is taken (e.g. by `npm run dev`).
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+    volumes:
+      - party-data:/data
+    # Locked down: nothing in the image can change, no Linux privileges, limited resources.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7@sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}"
+      # A company network that blocks QUIC (UDP 7844): set TUNNEL_PROTOCOL=http2 in .env (port 443).
+      TUNNEL_TRANSPORT_PROTOCOL: "${TUNNEL_PROTOCOL:-auto}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 128
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  party-data:

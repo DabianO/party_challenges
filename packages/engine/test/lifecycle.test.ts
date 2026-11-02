@@ -762,4 +762,12 @@ describe('board lifecycle', () => {
     game2.performHostAction({ action: 'close-challenge', instanceId: inst.id });
     expect(game2.snapshotFor({ role: 'host' }).leaderboard[0]).toMatchObject({ displayName: 'Ada', total: 10 });
   });
+
+  it('lets at most 200 players into one game', () => {
+    const { engine } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Big party' });
+    game.performHostAction({ action: 'open-lobby' });
+    for (let i = 0; i < 200; i++) game.join(`Guest ${i}`);
+    expect(() => game.join('One too many')).toThrow('This game is full (200 players)');
+  });
 });

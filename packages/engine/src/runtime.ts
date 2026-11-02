@@ -93,6 +93,8 @@ export interface HostActionResult {
 
 export type PlayerResult = { ok: true } | { ok: false; reason: string };
 
+/** Most players in one game: plenty for a party, and a ceiling on join floods. */
+export const MAX_PLAYERS = 200;
 const RATE_LIMIT_WINDOW_MS = 5_000;
 const RATE_LIMIT_MAX = 20;
 /** Live actions (taps) are batched by clients; allow a brisk but bounded rate. */
@@ -569,6 +571,7 @@ export class GameRuntime {
       this.commit();
       return { player: reclaimable, sessionToken, reclaimed: true };
     }
+    if (active.length >= MAX_PLAYERS) throw invalidState(`This game is full (${MAX_PLAYERS} players)`);
 
     const player: PersistedPlayer = {
       id: newId('p'),

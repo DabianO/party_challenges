@@ -12,6 +12,10 @@ const repoRoot = resolve(here, '../../..');
 
 const dev = process.argv.includes('--dev');
 const PORT = Number(process.env.PORT ?? 3000);
+/** Internet mode: the host's own server on this port (bind it to this machine only), PORT is public. */
+const ADMIN_PORT = process.env.ADMIN_PORT ? Number(process.env.ADMIN_PORT) : null;
+const ADMIN_HOST = process.env.ADMIN_HOST ?? '127.0.0.1';
+const MEDIA_MAX_PER_GAME_BYTES = process.env.MEDIA_MAX_PER_GAME_BYTES ? Number(process.env.MEDIA_MAX_PER_GAME_BYTES) : null;
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DATA_DIR = resolve(process.env.DATA_DIR ?? join(repoRoot, 'data'));
 const CHALLENGES_DIR = resolve(process.env.CHALLENGES_DIR ?? join(repoRoot, 'challenges'));
@@ -49,7 +53,7 @@ async function main(): Promise<void> {
 
   const dbPath = join(DATA_DIR, 'platform.sqlite');
   const repo = new SqliteRepository(dbPath);
-  const { app, engine } = await buildApp({
+  const { app, engine, adminServer } = await buildApp({
     registry,
     repo,
     dataDir: DATA_DIR,
@@ -63,12 +67,20 @@ async function main(): Promise<void> {
     logger: process.env.LOG === '1',
     hostKey: loadHostKey(DATA_DIR),
     localHostAccess: LOCAL_HOST_ACCESS,
+    adminSurface: ADMIN_PORT !== null,
+    mediaMaxPerGameBytes: MEDIA_MAX_PER_GAME_BYTES,
   });
   const { restored } = await engine.init();
   console.log(`[engine] restored ${restored} game(s); every change is saved automatically to ${dbPath}`);
 
   await app.listen({ port: PORT, host: HOST });
-  console.log(`[server] listening on http://${HOST}:${PORT}`);
+  if (adminServer && ADMIN_PORT !== null) {
+    await new Promise<void>((resolve, reject) => adminServer.once('error', reject).listen(ADMIN_PORT, ADMIN_HOST, () => resolve()));
+    console.log(`[server] public (guests and big screen only) on http://${HOST}:${PORT}`);
+    console.log(`[server] host controls on http://localhost:${ADMIN_PORT}/host (bound to ${ADMIN_HOST})`);
+  } else {
+    console.log(`[server] listening on http://${HOST}:${PORT}`);
+  }
   console.log(`[server] join links / QR codes use ${PUBLIC_URL}`);
   if (!process.env.PUBLIC_URL) {
     const others = rankAddresses().filter((c) => !PUBLIC_URL.includes(`//${c.address}:`));

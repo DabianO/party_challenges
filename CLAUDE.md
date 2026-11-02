@@ -123,6 +123,11 @@ host token; assignments are visible only to the judge and host; `judge()` accept
 assigned judge while pending and before the deadline; UI text is rendered as React text
 (no `dangerouslySetInnerHTML`); media is type/magic-byte checked and served with a sandbox CSP.
 
+**Internet mode** (`ADMIN_PORT`, `docs/deployment.md`): the public port serves only the
+allow-list in `packages/server/src/surface.ts` (guests and the big screen); host pages and APIs
+exist only on the admin port. A new guest-facing route must be added to that allow-list (and
+its test in `packages/server/test/surface.test.ts`), or it is a 404 online.
+
 **Host access:** `/api/local/games` hands host tokens (HMAC of `DATA_DIR/host-key`) to the
 host machine only (`isLocalRequest` in `app.ts`). The Vite proxy must keep `xfwd: true`,
 or every phone on the LAN would look local.

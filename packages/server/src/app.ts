@@ -3,7 +3,9 @@ import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
+import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
 import type { RawData, WebSocket } from 'ws';
 import type {
@@ -23,6 +25,7 @@ import type {
 import { Engine, EngineError, type GameRuntime, type ModuleRegistry, type SnapshotAudience } from '@challenge/engine';
 import { MediaError, MediaService } from './media.ts';
 import { exportSetupWithMedia, importSetupMedia } from './setup.ts';
+import { PUBLIC_LIMITS, RateLimiter, SECURITY_HEADERS, isPublicRequest, limitKindOf } from './surface.ts';
 import type { SqliteRepository } from './sqlite.ts';
 
 export interface AppConfig {
@@ -51,6 +54,31 @@ export interface AppConfig {
    * machine forwards public traffic without that header.
    */
   localHostAccess?: boolean;
+  /**
+   * Internet mode: besides the app's own (public) server, build a second, admin server for the
+   * host (see surface.ts). The public one serves only what guests and the big screen need;
+   * everything for the host exists only on the admin one, which must be bound to the host
+   * machine alone. Without it, one server does everything (LAN parties, development).
+   */
+  adminSurface?: boolean;
+  /** Most bytes of uploads one game may store (default: no limit). */
+  mediaMaxPerGameBytes?: number | null;
+}
+
+/** Marks requests (and WebSocket upgrades) that arrived on the admin server. */
+const ADMIN = Symbol('admin-surface');
+
+function onAdmin(raw: IncomingMessage): boolean {
+  return (raw as IncomingMessage & { [ADMIN]?: boolean })[ADMIN] === true;
+}
+
+/**
+ * The client's address for rate limits. Only Cloudflare's tunnel reaches the public server in
+ * internet mode, so its `cf-connecting-ip` is trustworthy there; otherwise the socket address.
+ */
+function clientAddress(req: FastifyRequest): string {
+  const cf = req.headers['cf-connecting-ip'];
+  return typeof cf === 'string' && cf ? cf : normalizeIp(req.socket.remoteAddress);
 }
 
 interface Conn {
@@ -186,7 +214,7 @@ function pickOptions(body: Record<string, unknown>): Partial<InstanceOptions> {
   return out;
 }
 
-export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstance; engine: Engine; hub: ConnectionHub }> {
+export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstance; engine: Engine; hub: ConnectionHub; adminServer: Server | null }> {
   const hub = new ConnectionHub();
   const media = new MediaService(join(config.dataDir, 'media'), config.repo, config.mediaMaxBytes);
   const engine = new Engine({
@@ -199,7 +227,74 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
   });
   const local = localAddresses();
 
-  const app = Fastify({ logger: config.logger ?? false, bodyLimit: 1024 * 1024 });
+  // Internet mode: one Fastify app behind two servers. The admin server marks what it receives
+  // (also WebSocket upgrades, which it hands to the app's own server) as admin traffic.
+  const servers: { admin: Server | null } = { admin: null };
+  /** WebSocket connections that came in on the admin server: a plain HTTP server does not end them on close. */
+  const adminSockets = new Set<Duplex>();
+  const app = Fastify({
+    logger: config.logger ?? false,
+    bodyLimit: 1024 * 1024,
+    ...(config.adminSurface
+      ? {
+          serverFactory: (handler: (req: IncomingMessage, res: ServerResponse) => void) => {
+            const server = createServer(handler);
+            const adminServer = createServer((req, res) => {
+              (req as IncomingMessage & { [ADMIN]?: boolean })[ADMIN] = true;
+              handler(req, res);
+            });
+            adminServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+              (req as IncomingMessage & { [ADMIN]?: boolean })[ADMIN] = true;
+              adminSockets.add(socket);
+              socket.once('close', () => adminSockets.delete(socket));
+              server.emit('upgrade', req, socket, head);
+            });
+            servers.admin = adminServer;
+            return server;
+          },
+        }
+      : {}),
+  });
+  const surfaces = config.adminSurface === true;
+  const limiter = new RateLimiter(PUBLIC_LIMITS);
+  const isPublic = (req: FastifyRequest) => surfaces && !onAdmin(req.raw);
+
+  app.addHook('onRequest', async (req, reply) => {
+    if (!surfaces) return;
+    if (onAdmin(req.raw)) {
+      // Only browsers on the host machine, by name: a web page elsewhere that points its own
+      // domain at 127.0.0.1 (DNS rebinding) must not reach the host's controls.
+      if (!hostHeaderIsLocal(req, local)) return reply.status(403).send({ error: 'Open this on the host machine (http://localhost)' });
+      return;
+    }
+    // Public: only what guests and the big screen need, and not too fast.
+    if (!isPublicRequest(req.method, req.url)) return reply.status(404).send({ error: 'Not found' });
+    const client = clientAddress(req);
+    const kind = limitKindOf(req.method, req.url);
+    const wait = Math.max(limiter.hit(client, 'all'), kind ? limiter.hit(client, kind) : 0);
+    if (wait > 0) return reply.status(429).header('Retry-After', String(wait)).send({ error: 'Too many requests, try again in a moment' });
+  });
+
+  // A refused WebSocket upgrade (wrong surface, too many, unknown route) is answered over the
+  // raw connection, which nothing closes afterwards: close it, or it lingers until shutdown.
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.headers.upgrade && reply.statusCode >= 400) req.raw.socket.destroy();
+  });
+
+  app.addHook('onSend', async (_req, reply, payload) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) if (!reply.hasHeader(name)) reply.header(name, value);
+    return payload;
+  });
+
+  const adminServer = servers.admin;
+  if (adminServer) {
+    const admin: Server = adminServer;
+    app.addHook('onClose', async () => {
+      for (const socket of adminSockets) socket.destroy();
+      admin.closeAllConnections();
+      await new Promise<void>((resolve) => admin.close(() => resolve()));
+    });
+  }
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
   await app.register(multipart, { limits: { fileSize: config.mediaMaxBytes, files: 1 } });
 
@@ -228,7 +323,7 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
   // ---------------------------------------------------------------------------
   // Library
   // ---------------------------------------------------------------------------
-  app.get('/api/health', async () => ({ ok: true, modules: config.registry.size, games: engine.listGames().length }));
+  app.get('/api/health', async (req) => (isPublic(req) ? { ok: true } : { ok: true, modules: config.registry.size, games: engine.listGames().length }));
 
   app.get('/api/modules', async () => ({ modules: config.registry.info() }));
 
@@ -257,7 +352,9 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
 
   /** Every stored game with a host token, for a browser on the host machine only. */
   app.get('/api/local/games', async (req, reply) => {
-    if (!config.localHostAccess || !isLocalRequest(req, local)) {
+    // The admin server is bound to the host machine (in Docker the socket address is the
+    // container gateway, so the address check cannot tell).
+    if (!config.localHostAccess || !(onAdmin(req.raw) || (!surfaces && isLocalRequest(req, local)))) {
       return reply.status(403).send({ error: 'Only available on the machine running the server' });
     }
     const games: LocalGameInfo[] = [];
@@ -375,6 +472,8 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
     if (!file) throw new MediaError('No file uploaded');
     const data = await file.toBuffer();
     if (file.file.truncated) throw new MediaError(`File exceeds ${Math.round(config.mediaMaxBytes / 1024 / 1024)} MB limit`, 413);
+    const cap = config.mediaMaxPerGameBytes;
+    if (cap && config.repo.mediaBytesForGame(gameId) + data.length > cap) throw new MediaError('This game has no room for more uploads', 413);
     const record = await media.store({ data, mimeType: file.mimetype, originalName: file.filename, gameId, owner });
     return {
       id: record.id,
@@ -647,5 +746,5 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
     });
   }
 
-  return { app, engine, hub };
+  return { app, engine, hub, adminServer };
 }

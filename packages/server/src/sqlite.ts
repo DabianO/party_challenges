@@ -531,6 +531,12 @@ export class SqliteRepository implements Repository {
       .run(m.id, m.gameId, m.owner, m.mimeType, m.storageRef, m.size, m.checksum, m.originalName, m.createdAt);
   }
 
+  /** Bytes of uploads stored for a game (per-game cap). */
+  mediaBytesForGame(gameId: string): number {
+    const r = this.db.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM media_assets WHERE game_id = ?').get(gameId) as Row | undefined;
+    return Number(r?.total ?? 0);
+  }
+
   getMedia(id: string): MediaRecord | null {
     const r = this.db.prepare('SELECT * FROM media_assets WHERE id = ?').get(id) as Row | undefined;
     if (!r) return null;

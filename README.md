@@ -66,6 +66,10 @@ npm run build
 npm start
 ```
 
+To host a party **on the internet** (your own domain, guests on mobile data, the laptop not
+exposed), see [docs/deployment.md](docs/deployment.md): Docker plus a Cloudflare Tunnel,
+started with `npm run party:up`.
+
 Use this for the party itself. With `npm run dev`, Vite reloads a phone's page whenever its
 connection drops and comes back (stand-by, or opening the camera for a photo). The app copes
 (unsent answers and uploaded photos are kept for the tab), but the production run avoids
@@ -84,6 +88,8 @@ those reloads altogether.
 | `MEDIA_MAX_BYTES` | `10485760` | Upload size limit |
 | `MEDIA_BASE_URL` | *(same origin)* | Serve media from a separate origin (SR-8 hardening) |
 | `HOST_CREATE_PASSWORD` | *(unset)* | Require a shared password to create games |
+| `ADMIN_PORT` / `ADMIN_HOST` | *(unset)* / `127.0.0.1` | Internet mode: host controls on this port only; `PORT` then serves guests and the big screen only (see `docs/deployment.md`) |
+| `MEDIA_MAX_PER_GAME_BYTES` | *(no limit)* | All uploads of one game together |
 | `LOG` | *(unset)* | `1` enables request logging |
 
 ## Repository layout

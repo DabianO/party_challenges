@@ -15,7 +15,10 @@
     "start": "npm run start -w @challenge/server",
     "test": "vitest run",
     "typecheck": "tsc -p packages/contract && tsc -p packages/engine && tsc -p packages/server && tsc -p packages/web --noEmit && tsc -p challenges/tsconfig.json",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "party:up": "docker compose up -d --build",
+    "party:down": "docker compose down",
+    "party:logs": "docker compose logs -f --tail 100"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

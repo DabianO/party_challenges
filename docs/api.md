@@ -56,6 +56,24 @@ too, so the proxy must append it (`xfwd: true` in `vite.config.ts`). Set
 `LOCAL_HOST_ACCESS=0` when a reverse proxy on the host forwards outside traffic without
 that header.
 
+**Internet mode** (`ADMIN_PORT` set; see `docs/deployment.md`): the server listens twice.
+- **`PORT` (public):** answers only the allow-list in `packages/server/src/surface.ts`:
+  - the client's pages except `/host`, and its static files
+  - `/api/health` (just `{ ok: true }`), `/api/games/by-code/:code`, `/api/join`,
+    `/api/join/resume`, `/api/games/:id/results`, `/api/evidence`, `/api/avatar`, `/media/:id`
+  - `/ws` for players and the big screen by code
+
+  Everything else answers 404, even with a valid host token. Per client address
+  (`cf-connecting-ip` from the Cloudflare tunnel) it allows per minute: 3000 requests in
+  total, 60 joins, 240 code lookups, 240 uploads and 600 WebSocket connections. More gives
+  429 with `Retry-After`.
+- **`ADMIN_PORT`:** serves everything, but only to requests whose Host header names this
+  machine (`localhost`, a local address). Bind it to the host machine only. `/api/local/games`
+  works there without the address check.
+
+Every response carries a strict `Content-Security-Policy`, `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
+
 ### Host actions
 
 | `action` | Effect |
