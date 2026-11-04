@@ -227,6 +227,12 @@ export interface ButtonNode {
   tone?: Tone;
   size?: 'md' | 'lg' | 'huge';
   disabled?: boolean;
+  /**
+   * `false`: the submission keeps the attempt open (e.g. "Save", come back later), for modules
+   * with `resubmission: "replace"`; every save replaces the last one. Default: it locks the
+   * answer in. Enter in a text box acts like the first button of the screen.
+   */
+  final?: boolean;
 }
 
 /**
@@ -359,6 +365,87 @@ export interface DistributionNode {
   compact?: boolean;
 }
 
+/**
+ * Two columns to link item by item (e.g. Match Up): tap an item on one side, then one on the
+ * other side to link them; tap a linked item to undo its link. Every change is sent at once as
+ * the live action `{ [action]: { left, right } }` (a new link replaces any link either item
+ * had) or `{ [action]: { left, right: null } }` (undo). Links show as a shared colour and
+ * number; whether they are right is never shown.
+ */
+export interface PairMatchNode {
+  type: 'pair-match';
+  /** Payload key of the live action. */
+  action: string;
+  left: { id: string; label: string }[];
+  right: { id: string; label: string }[];
+  /** The links so far: left id → right id. */
+  links: Record<string, string>;
+  leftTitle?: string;
+  rightTitle?: string;
+}
+
+/**
+ * A box for entering many short answers one after another (e.g. "name as many as you can"):
+ * Enter or the button sends the text as the live action `{ [action]: text }`, empties the box
+ * and keeps the keyboard open. The module shows what came of every entry with its own nodes.
+ */
+export interface WordEntryNode {
+  type: 'word-entry';
+  /** Payload key of the live action. */
+  action: string;
+  placeholder?: string;
+  maxLength?: number;
+  /** Label of the send button (default "Add"). */
+  buttonLabel?: string;
+}
+
+/**
+ * A direction pad for steering something together (e.g. Balloon Pop's crosshair): four arrows
+ * around a fire button. Arrow presses are counted on the device and sent in batches as the live
+ * action `{ [action]: { move: [dx, dy] } }` (presses right minus left, down minus up; at most
+ * 20 either way per batch); the fire
+ * button sends `{ [action]: { fire: true } }` at once, after any presses still waiting. On a
+ * computer the arrow keys and the space bar work too.
+ */
+export interface DPadNode {
+  type: 'd-pad';
+  /** Payload key of the live actions. */
+  action: string;
+  fireLabel?: string;
+  /** How often counted presses are sent, in ms (default 120). */
+  batchMs?: number;
+  disabled?: boolean;
+}
+
+/** Something to aim at on an `aim-field`. */
+export interface AimTarget {
+  id: string;
+  /** Centre, 0..1 across and down the field. */
+  x: number;
+  y: number;
+  /** Diameter as a share of the field's width. */
+  size: number;
+  /** `#rrggbb`. */
+  color: string;
+}
+
+/**
+ * A 16:9 field with a crosshair, its home base and targets (balloons) that float a little,
+ * meant for the big screen (`displayOverlay`). Positions are 0..1 across and down; the
+ * crosshair glides to each new position. `bursts` play a pop where a target was hit, with a
+ * short text (e.g. who hit it); give each burst a new id. `shot` flashes at the latest shot (a
+ * new id for every shot, hit or not).
+ */
+export interface AimFieldNode {
+  type: 'aim-field';
+  crosshair: { x: number; y: number };
+  /** The square the crosshair starts from; `size` as a share of the field's width. */
+  home: { x: number; y: number; size: number };
+  targets: AimTarget[];
+  bursts?: { id: string; x: number; y: number; text: string; color?: string }[];
+  shot?: { id: string; x: number; y: number };
+}
+
 /** One player's territory in a `blob-field`. */
 export interface BlobSpec {
   id: string;
@@ -432,7 +519,11 @@ export type UINode =
   | DistributionNode
   | BlobFieldNode
   | QuickRoundsNode
-  | SpoolNode;
+  | SpoolNode
+  | PairMatchNode
+  | WordEntryNode
+  | DPadNode
+  | AimFieldNode;
 
 export type InputNode = ChoicesInputNode | NumberInputNode | TextInputNode | SliderInputNode | ToggleInputNode | FileInputNode;
 
@@ -588,6 +679,24 @@ export const ui = {
     ...opts,
   }),
   spool: (parts: string[], entries: SpoolNode['entries'], index: number): SpoolNode => ({ type: 'spool', parts, entries, index }),
+  pairMatch: (action: string, left: PairMatchNode['left'], right: PairMatchNode['right'], links: Record<string, string>, opts: Pick<PairMatchNode, 'leftTitle' | 'rightTitle'> = {}): PairMatchNode => ({
+    type: 'pair-match',
+    action,
+    left,
+    right,
+    links,
+    ...opts,
+  }),
+  wordEntry: (action: string, opts: Omit<WordEntryNode, 'type' | 'action'> = {}): WordEntryNode => ({ type: 'word-entry', action, ...opts }),
+  dPad: (action: string, opts: Omit<DPadNode, 'type' | 'action'> = {}): DPadNode => ({ type: 'd-pad', action, ...opts }),
+  aimField: (crosshair: AimFieldNode['crosshair'], home: AimFieldNode['home'], targets: AimTarget[], bursts: NonNullable<AimFieldNode['bursts']> = [], shot?: AimFieldNode['shot']): AimFieldNode => ({
+    type: 'aim-field',
+    crosshair,
+    home,
+    targets,
+    bursts,
+    ...(shot ? { shot } : {}),
+  }),
   blobField: (fieldId: string, mode: BlobFieldNode['mode'], grid: { cols: number; rows: number; cells: string }, blobs: BlobSpec[]): BlobFieldNode => ({
     type: 'blob-field',
     fieldId,

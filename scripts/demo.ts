@@ -93,6 +93,33 @@ async function main(): Promise<void> {
 
   // Every challenge opens when the game starts.
   await add('multiple-choice', { question: 'Which planet has the most moons?', options: ['Jupiter', 'Saturn', 'Uranus', 'Neptune'], correctIndex: 1, timeLimit: 20, points: 10 }, { title: 'Space trivia' });
+  await add(
+    'match-up',
+    {
+      instructions: 'Match each capital to its country',
+      leftTitle: 'Capital',
+      rightTitle: 'Country',
+      pairs: [
+        { left: 'Canberra', right: 'Australia' },
+        { left: 'Ottawa', right: 'Canada' },
+        { left: 'Bern', right: 'Switzerland' },
+        { left: 'Wellington', right: 'New Zealand' },
+        { left: 'Ankara', right: 'Turkey' },
+      ],
+      pointsPerMatch: 2,
+    },
+    { title: 'Capital match' },
+  );
+  await add(
+    'name-them-all',
+    {
+      prompt: 'Name the Mars rovers',
+      answers: [{ answer: 'Sojourner' }, { answer: 'Spirit' }, { answer: 'Opportunity' }, { answer: 'Curiosity' }, { answer: 'Perseverance' }, { answer: 'Zhurong', alternatives: 'Zhu Rong', points: 3 }],
+      pointsEach: 2,
+      timeLimit: 60,
+    },
+    { title: 'Mars rovers' },
+  );
   await add('multi-answer', { question: 'How many keys does a standard piano have?', answers: [{ answer: '88', tolerance: 2, unit: 'keys' }], timeLimit: 20 }, { title: 'Piano keys' });
   await add(
     'multi-answer',
@@ -118,6 +145,7 @@ async function main(): Promise<void> {
   await add('photo-hunt', { task: 'Take a photo of something red in the room', timeLimit: 180, points: 10 }, { title: 'Red alert' });
   await add('majority-vote', { question: 'Pineapple on pizza?', options: ['Obviously yes', 'Absolutely not', 'Only when nobody is watching'], timeLimit: 20 }, { title: 'Pizza debate' });
   await add('blob-war', { points: 10, tapsToMax: 150, maxShare: 0.2 }, { title: 'Blob war' });
+  await add('balloon-pop', { intervalMinutes: 1, pointsPerPop: 1 }, { title: 'Balloon pop' });
   await add('group-message', { prompt: 'Write a birthday message for Dabian', wordsPerTurn: 3, visibleWords: 35, turnSeconds: 300, maxTurnsPerPlayer: 10, pointsPerTurn: 1 }, { title: 'Birthday message' });
   await add('secret-word', { maxPoints: 10, pointsPerWord: 2 }, { title: 'Secret words' });
   await add('selfiemotion', { timeLimit: 120, points: 5 }, { title: 'Selfiemotion' });

@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "required": ["pairs"],
+  "properties": {
+    "instructions": {
+      "type": "string",
+      "title": "Instructions (optional)",
+      "description": "e.g. \"Match each capital to its country.\"",
+      "maxLength": 200
+    },
+    "leftTitle": { "type": "string", "title": "Left column title (optional)", "description": "e.g. \"Capital\"", "maxLength": 40 },
+    "rightTitle": { "type": "string", "title": "Right column title (optional)", "description": "e.g. \"Country\"", "maxLength": 40 },
+    "pairs": {
+      "type": "array",
+      "title": "Pairs",
+      "description": "Each row is a correct match, filled in side by side. Players see both columns in their own random order.",
+      "minItems": 2,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["left", "right"],
+        "properties": {
+          "left": { "type": "string", "title": "Left", "minLength": 1, "maxLength": 80 },
+          "right": { "type": "string", "title": "Right", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    },
+    "pointsPerMatch": {
+      "type": "integer",
+      "title": "Points per correct match",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 2
+    },
+    "bonus": {
+      "type": "integer",
+      "title": "Bonus for matching everything right",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 0
+    }
+  }
+}

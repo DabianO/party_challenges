@@ -84,6 +84,11 @@ export default defineModule<Config, State, Input, Evaluation>({
     return { config, stage: {}, answers: {} };
   },
 
+  // The picture, then the time to answer (only when answering is timed too).
+  timeLimit(state) {
+    return state.config.answerSeconds > 0 ? state.config.viewSeconds + state.config.answerSeconds : null;
+  },
+
   onAttemptStart(state, player, ctx) {
     // Show the image first; the question (and this player's lock timer) follow once it is hidden.
     ctx.schedule('hide', state.config.viewSeconds, player.id);

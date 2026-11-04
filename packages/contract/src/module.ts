@@ -137,6 +137,12 @@ export interface PresentationSlide {
  */
 export type StartCheck = { ok: true; hint?: string; urgent?: boolean } | { ok: false; reason: string; finished?: boolean };
 
+/** One piece of a big-screen top-bar line (`displayBanner`); `color` (#rrggbb) e.g. for a player's name. */
+export interface BannerPart {
+  text: string;
+  color?: string;
+}
+
 /** `playerNote` with a tone: `danger`/`warning` show as a warning instead of "Locked in ✓". */
 export interface PlayerNote {
   text: string;
@@ -239,6 +245,12 @@ export interface GuestViewModel {
   canSubmit: boolean;
   /** Short status shown in the guest chrome (e.g. "Answer locked in"). */
   status?: string;
+  /**
+   * Leaving the screen locks the answer in: the phone submits an empty payload (final) when
+   * the player goes back to the board. For answers built up with live actions, e.g. once every
+   * pair of a Match Up is linked (`validateInput` must accept `{}` then).
+   */
+  lockOnLeave?: boolean;
 }
 
 export interface ResultsViewModel {
@@ -310,6 +322,13 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   reopenFor?(state: State, player: PlayerRef, ctx: InstanceContext): State;
   /** Called when a player's attempt locks (submitted, finished, timed out, or instance closed). */
   onAttemptLocked?(state: State, player: PlayerRef, ctx: InstanceContext): State;
+  /**
+   * `immediate` results only. When an attempt locks without a submission (time up, Finish,
+   * the host closing the challenge), the engine records this as the player's submission and
+   * evaluates it, so answers given as live actions count (e.g. every name entered before the
+   * time ran out). Null: nothing to record (the attempt is missed). Runs after `onAttemptLocked`.
+   */
+  lockInput?(state: State, player: PlayerRef, ctx: InstanceContext): Input | null;
 
   // Input ------------------------------------------------------------------
   validateInput(state: State, player: PlayerRef, input: Input, ctx: InstanceContext): ValidationResult;
@@ -344,6 +363,11 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   /** Instructions shown before the player presses Start. Falls back to the manifest description. */
   introView?(state: State, player: PlayerRef, ctx: InstanceContext): UINode;
   /**
+   * Seconds the player will have once they start (the `lock` timer `onAttemptStart` sets), or
+   * null for no time limit. The phone warns the player before Start, so they can still go back.
+   */
+  timeLimit?(state: State, player: PlayerRef, ctx: InstanceContext): number | null;
+  /**
    * Short personal feedback for the player's tile and lock-in message, shown even while
    * the host keeps results hidden (e.g. "312 ms · best 287 ms" so players can improve).
    * It bypasses the hidden-results rule: share only what is meant to be seen right away.
@@ -365,8 +389,15 @@ export interface ChallengeModule<Config = unknown, State = unknown, Input = unkn
   /**
    * Optional short line for the big screen's top bar while the instance is open, e.g.
    * "✍️ Bea's turn to write: open your phone". Everyone sees it (MR-9). Null for nothing.
+   * Return parts instead of a string to colour some of it (e.g. the player's name in their colour).
    */
-  displayBanner?(state: State, ctx: InstanceContext): string | null;
+  displayBanner?(state: State, ctx: InstanceContext): string | BannerPart[] | null;
+  /**
+   * Optional layer over the whole big screen while the instance is open, e.g. a balloon to
+   * shoot (`ui.aimField`). Drawn in a 16:9 box over everything else, see-through and not
+   * clickable; hidden during the results presentation. Everyone sees it (MR-9). Null for nothing.
+   */
+  displayOverlay?(state: State, ctx: InstanceContext): UINode | null;
   /**
    * Optional items for the big screen's spotlight, which shows one item a minute from every
    * open instance that has any: the one with the most new answers since it was last shown,

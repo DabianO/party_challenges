@@ -43,7 +43,7 @@ function fill(state: State, who: PlayerRef, payload: Record<string, unknown>) {
 
 describe('fill-in-the-blanks', () => {
   it('has a consistent manifest: creativity, automatic, immediate', () => {
-    expect(mod.manifest).toMatchObject({ id: 'fill-in-the-blanks', version: '1.2.0', apiVersion: '2', category: 'creativity', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'fill-in-the-blanks', version: '1.3.0', apiVersion: '2', category: 'creativity', results: 'immediate', resubmission: 'replace' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -159,5 +159,39 @@ describe('fill-in-the-blanks', () => {
     state = mod.onPhaseChange!(state, 'LOCKED', timed);
     expect(mod.displayPanel!(state, timed)).toBeNull();
     expect(scheduled.at(-1)).toBe('cancel:feed');
+  });
+});
+
+describe('fill-in-the-blanks: save and come back', () => {
+  it('keeps saved words, offers Save before Done, and feeds each sentence once', () => {
+    const ada = players[0]!;
+    let state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
+    state = mod.onAttemptStart!(state, ada, ctx);
+    state = mod.handleInput(state, ada, { s0b0: 'the snacks' }, ctx);
+    // Back later: the first sentence is still filled in; the second is added and saved again.
+    const view = JSON.stringify(mod.guestView(state, ada, ctx).ui);
+    expect(view).toContain('"name":"s0b0"');
+    expect(view).toContain('"value":"the snacks"');
+    expect(view.indexOf('"final":false')).toBeGreaterThan(-1);
+    expect(view.indexOf('Save')).toBeLessThan(view.indexOf('Done: lock in'));
+    expect(mod.guestView(state, ada, ctx).status).toBe('1 of 3 sentences saved · come back any time');
+    state = mod.handleInput(state, ada, { s0b0: 'the snacks!', s1b0: 'A duck', s1b1: 'a goose' }, ctx);
+    expect(state.feed).toEqual([
+      { playerId: 'p1', sentence: 0 },
+      { playerId: 'p1', sentence: 1 },
+    ]);
+    expect(state.entries.p1![0]).toEqual(['the snacks!']);
+  });
+
+  it('shows a player only their own sentences until the challenge is closed', () => {
+    let state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
+    const a = fill(state, players[0]!, { s0b0: 'the snacks' });
+    const b = fill(a.state, players[1]!, { s0b0: 'the music' });
+    state = b.state;
+    const open = JSON.stringify(mod.resultsView(state, [a.evaluation, b.evaluation], ctx).guestUi!(players[0]!));
+    expect(open).toContain('the snacks');
+    expect(open).not.toContain('the music');
+    state = mod.onPhaseChange!(state, 'LOCKED', ctx);
+    expect(JSON.stringify(mod.resultsView(state, [a.evaluation, b.evaluation], ctx).guestUi!(players[0]!))).toContain('the music');
   });
 });

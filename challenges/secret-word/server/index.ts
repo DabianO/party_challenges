@@ -11,12 +11,14 @@
  * player is still waiting for the right moment. An unanswered word stays in progress, so the
  * player can go back to the board, play other challenges and return to it later.
  *
- * No two players get the same word while the list lasts.
+ * No two players get the same word while the list lasts. Built-in words come with their Dutch
+ * translation in brackets (`words.nl.json`).
  */
 import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 import wordsJson from '../words.json' with { type: 'json' };
+import dutchJson from '../words.nl.json' with { type: 'json' };
 
 interface Config {
   maxPoints: number;
@@ -62,7 +64,20 @@ interface Evaluation {
 }
 
 const BUILT_IN: string[] = wordsJson as string[];
+const DUTCH: Record<string, string> = dutchJson as Record<string, string>;
 const MAX_WORD_LENGTH = 40;
+
+/** The Dutch for a built-in word (also when the host typed it themselves), unless it is the same word. */
+export function dutchOf(word: string): string | null {
+  const nl = DUTCH[word.toLowerCase()];
+  return nl && nl.toLowerCase() !== word.toLowerCase() ? nl : null;
+}
+
+/** "aardvark (aardvarken)". */
+function withDutch(word: string): string {
+  const nl = dutchOf(word);
+  return nl ? `${word} (${nl})` : word;
+}
 
 /** The host's own words, deduplicated case-insensitively (empty when there are none). */
 function customOf(config: Config): string[] {
@@ -245,7 +260,15 @@ export default defineModule<Config, State, Input, Evaluation>({
     return {
       ui: ui.stack(
         [
-          ui.card([ui.caption(`Your secret word · ${number} of ${total}`, { align: 'center' }), ui.display(word), ui.caption(HOW_TO, { align: 'center' })], 'primary'),
+          ui.card(
+            [
+              ui.caption(`Your secret word · ${number} of ${total}`, { align: 'center' }),
+              ui.display(word),
+              ...(dutchOf(word) ? [ui.subtitle(`(${dutchOf(word)})`, { align: 'center' })] : []),
+              ui.caption(HOW_TO, { align: 'center' }),
+            ],
+            'primary',
+          ),
           ui.text('Did it work?', { align: 'center' }),
           ui.submit('✓ Yes, nobody noticed', { payload: { word, succeeded: true }, tone: 'success', size: 'lg' }),
           ui.submit('✗ No, I was caught or gave up', { payload: { word, succeeded: false }, tone: 'danger', size: 'lg' }),
@@ -285,7 +308,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     // The fun part afterwards: which words got past everyone.
     const slipped: UINode[] = sorted
       .filter(([, r]) => r.won.length > 0)
-      .map(([, r]) => ui.text(`${r.name}: ${r.won.join(', ')}`));
+      .map(([, r]) => ui.text(`${r.name}: ${r.won.map(withDutch).join(', ')}`));
     const succeeded = evaluations.filter((e) => e.succeeded).length;
     const badges = ui.row(
       [ui.badge(plural(evaluations.length, 'word') + ' played'), ui.badge(`${succeeded} unnoticed`, succeeded ? 'success' : 'neutral'), ui.badge(`${evaluations.length - succeeded} spotted`)],
@@ -310,7 +333,7 @@ export default defineModule<Config, State, Input, Evaluation>({
               [
                 ui.display(`${won.length} of ${mine.length}`),
                 ui.text(`words slipped by unnoticed (of ${total})`, { tone: 'muted' }),
-                ...(won.length ? [ui.text(won.map((e) => e.word).join(', '))] : []),
+                ...(won.length ? [ui.text(won.map((e) => withDutch(e.word)).join(', '))] : []),
               ],
               won.length ? 'success' : 'neutral',
             )

@@ -54,8 +54,9 @@ export function BlobField({ node }: { node: BlobFieldNode }) {
     const resize = () => {
       const rect = wrap.getBoundingClientRect();
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      width = Math.max(200, Math.floor(rect.width));
-      height = Math.max(140, Math.floor(rect.height));
+      // Exactly the frame (a bigger canvas than its frame would be cut off on one side).
+      width = Math.max(40, Math.floor(rect.width));
+      height = Math.max(40, Math.floor(rect.height));
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;

@@ -82,6 +82,10 @@ export default defineModule<Config, State, Input, Evaluation>({
     return { config, picks: {} };
   },
 
+  timeLimit(state) {
+    return state.config.timeLimit > 0 ? state.config.timeLimit : null;
+  },
+
   onAttemptStart(state, player, ctx) {
     // Per-player time limit: the engine locks this player's attempt when it fires.
     if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit

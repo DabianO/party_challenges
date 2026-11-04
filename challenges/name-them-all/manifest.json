@@ -1,0 +1,14 @@
+{
+  "id": "name-them-all",
+  "name": "Name Them All",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "knowledge",
+  "description": "Name as many as you can before the time runs out, e.g. every planet or every Mars rover. Forgiving about capitals, spaces, hyphens and small spelling mistakes; every answer scores its own points.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 90 },
+  "capabilities": ["timer", "text-input", "image", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none"
+}

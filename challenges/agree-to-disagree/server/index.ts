@@ -179,7 +179,7 @@ export default defineModule<Config, State, unknown, Evaluation>({
           ui.caption(INSTRUCTIONS),
           ...statements.map((s) =>
             ui.card([
-              ui.text(s.text),
+              ui.subtitle(s.text, { align: 'center' }),
               ui.liveAnswer(ACTION, s.id, state.answers[s.id]?.[player.id] ?? null, {
                 min: 0,
                 max: MAX,

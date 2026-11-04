@@ -18,15 +18,92 @@ export function statsLine(c: ChallengeInstanceSummary): string {
   return parts.join(' · ');
 }
 
+type Order = 'board' | 'category';
+const ORDER_KEY = 'run-challenge-order';
+
+function savedOrder(): Order {
+  try {
+    return localStorage.getItem(ORDER_KEY) === 'category' ? 'category' : 'board';
+  } catch {
+    return 'board';
+  }
+}
+
+/** Challenges by the host's category (alphabetical, none last), board order inside each. */
+export function byCategory(challenges: ChallengeInstanceSummary[]): { category: string; items: { c: ChallengeInstanceSummary; index: number }[] }[] {
+  const groups = new Map<string, { c: ChallengeInstanceSummary; index: number }[]>();
+  challenges.forEach((c, index) => groups.set(c.category, [...(groups.get(c.category) ?? []), { c, index }]));
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b))
+    .map(([category, items]) => ({ category, items }));
+}
+
 export function ChallengeControls({ ctx, act, busy }: { ctx: HostCtx; act: Act; busy: boolean }) {
   const { challenges, game } = ctx.snapshot;
+  const [order, setOrder] = useState<Order>(savedOrder);
   if (challenges.length === 0) return <p className="muted">No challenges in this game. Add some in Setup.</p>;
+  const running = game.status === 'IN_PROGRESS';
+  const closedCount = challenges.filter((c) => c.phase === 'LOCKED' || c.phase === 'EVALUATING' || c.phase === 'RESULTS').length;
+  const choose = (next: Order) => {
+    setOrder(next);
+    try {
+      localStorage.setItem(ORDER_KEY, next);
+    } catch {
+      // Only a convenience.
+    }
+  };
+  const row = (c: ChallengeInstanceSummary, index: number) => <ChallengeRow key={c.id} ctx={ctx} c={c} index={index} act={act} busy={busy} running={running} />;
+
   return (
-    <ol className="plain-list stack gap-sm">
-      {challenges.map((c, i) => (
-        <ChallengeRow key={c.id} ctx={ctx} c={c} index={i} act={act} busy={busy} running={game.status === 'IN_PROGRESS'} />
-      ))}
-    </ol>
+    <div className="stack gap-sm">
+      <div className="row gap-sm wrap align-center challenge-toolbar">
+        <div className="segmented" role="group" aria-label="Sort challenges">
+          <button type="button" className={`btn btn-sm ${order === 'board' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={order === 'board'} onClick={() => choose('board')}>
+            Board order
+          </button>
+          <button type="button" className={`btn btn-sm ${order === 'category' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={order === 'category'} onClick={() => choose('category')}>
+            By category
+          </button>
+        </div>
+        <span className="grow" />
+        {running && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={busy || closedCount === 0}
+            title="Open every closed challenge again. Players who played keep their result; Hot Takes and Blob War carry on where they were and are scored again when you close them."
+            onClick={() => void act({ action: 'reopen-all-challenges' }, `Open all ${closedCount} closed challenges again?`)}
+          >
+            ▶ Reopen all closed ({closedCount})
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-danger btn-ghost btn-sm"
+          disabled={busy}
+          onClick={() =>
+            void act(
+              { action: 'reset-all-challenges' },
+              `Reset all ${challenges.length} challenges? Every attempt is discarded and all points from challenges are reversed. Players stay in the game.`,
+            )
+          }
+        >
+          ↺ Reset all
+        </button>
+      </div>
+      {order === 'category' ? (
+        byCategory(challenges).map((g) => (
+          <section key={g.category} className="stack gap-xs" aria-label={g.category || 'No category'}>
+            <h3 className="run-group-title">
+              {g.category || 'No category'} <span className="muted">({g.items.length})</span>
+            </h3>
+            <ol className="plain-list stack gap-xs">{g.items.map(({ c, index }) => row(c, index))}</ol>
+          </section>
+        ))
+      ) : (
+        <ol className="plain-list stack gap-xs">{challenges.map((c, i) => row(c, i))}</ol>
+      )}
+    </div>
   );
 }
 
@@ -54,24 +131,23 @@ function ChallengeRow({ ctx, c, index, act, busy, running }: { ctx: HostCtx; c: 
   };
 
   return (
-    <li className={`card card-flat stack gap-sm challenge-control phase-${c.phase}`}>
-      <div className="row gap-sm align-start wrap">
+    <li className={`card card-flat stack gap-xs challenge-control phase-${c.phase}`}>
+      <div className="challenge-control-main">
         <span className="challenge-index mono" aria-hidden="true">
           {index + 1}
         </span>
-        <div className="grow stack gap-xs">
-          <span className="row gap-sm align-center wrap">
+        <div className="grow stack gap-xs challenge-control-info">
+          <span className="row gap-xs align-center wrap">
             <strong>{c.title}</strong>
             <PhaseBadge phase={c.phase} availability={c.availability} started={ctx.snapshot.game.startedAt !== null} />
-          </span>
-          {subtitleOf(c) && <span className="muted small clamp">{subtitleOf(c)}</span>}
-          <span className="row gap-xs wrap">
+            {c.category && <span className="badge tone-neutral">{c.category}</span>}
             <AvailabilityBadge availability={c.availability} assignedCount={c.assignedPlayerIds?.length} />
             <EvaluationBadge mode={c.evaluationMode} />
-            <span className="badge tone-muted">{c.results === 'immediate' ? 'Scored on submit' : 'Scored when closed'}</span>
             {c.allowReplay && <span className="badge tone-primary">↻ Replays</span>}
           </span>
-          <span className="muted small mono">{statsLine(c)}</span>
+          <span className="muted small clamp" title={subtitleOf(c) ?? undefined}>
+            {[subtitleOf(c), c.results === 'immediate' ? 'scored on submit' : 'scored when closed', statsLine(c)].filter(Boolean).join(' · ')}
+          </span>
           {running && c.closedFor && c.closedFor.length > 0 && (
             <span className="row gap-xs wrap align-center closed-for">
               <span className="small">Closed for:</span>

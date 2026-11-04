@@ -4,6 +4,7 @@
 import type { UINode } from './ui.ts';
 import type {
   Availability,
+  BannerPart,
   ChallengePhase,
   EvaluationMode,
   EventAudience,
@@ -148,7 +149,9 @@ export interface ChallengeInstanceSummary {
   /** Main display only: the module's live big-screen panel (`displayPanel`), when it has one and has started. */
   displayPanel?: UINode | null;
   /** Main display only: the module's line for the big screen's top bar (`displayBanner`), while open. */
-  displayBanner?: string | null;
+  displayBanner?: BannerPart[] | null;
+  /** Main display only: the module's layer over the whole big screen (`displayOverlay`), while open. */
+  displayOverlay?: UINode | null;
 }
 
 export interface LeaderboardEntry {
@@ -269,6 +272,10 @@ export interface BoardEntry {
   timers: TimerInfo[];
   /** Whether the player may finish early (resubmission = replace). */
   canFinish: boolean;
+  /** Going back to the board locks the answer in (the module's `lockOnLeave`). */
+  lockOnLeave: boolean;
+  /** While the player may start: the seconds they will have (the module's `timeLimit`), or null. */
+  timeLimit: number | null;
 }
 
 /** A judging task on a guest's phone (FR-54, FR-63). */
@@ -613,6 +620,8 @@ export type HostAction =
   /** Every closed challenge open again at once (e.g. after continuing a closed game). */
   | { action: 'reopen-all-challenges' }
   | { action: 'reset-challenge'; instanceId: string }
+  /** Every challenge back to the start at once: all attempts discarded, all their points reversed. */
+  | { action: 'reset-all-challenges' }
   /** Give one player another go at a challenge the module closed for them (`closedFor`). */
   | { action: 'reopen-for-player'; instanceId: string; playerId: string }
   | { action: 'assign-challenge'; instanceId: string; playerIds: string[] }

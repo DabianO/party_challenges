@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InstanceContext, PlayerRef, Submission } from '@challenge/contract';
-import mod from '../server/index.ts';
+import mod, { dutchOf } from '../server/index.ts';
 import words from '../words.json' with { type: 'json' };
 
 /** Small deterministic RNG (mulberry32) so word picks look like the real seeded one. */
@@ -58,7 +58,7 @@ function play(state: State, ctx: InstanceContext, who: PlayerRef, succeeded: boo
 
 describe('secret-word', () => {
   it('has a consistent manifest: automatic, immediate, one word per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.3.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.4.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -213,12 +213,24 @@ describe('secret-word', () => {
       { rank: 2, name: 'Ada', value: '1 of 2 unnoticed', points: 2 },
     ]);
     const shared = JSON.stringify(results.ui);
-    expect(shared).toContain('Bea: submarine, lighthouse');
+    expect(shared).toContain('Bea: submarine (onderzeeër), lighthouse (vuurtoren)');
     expect(shared).toContain('Ada: pineapple');
     expect(shared).not.toContain('volcano');
     const mine = JSON.stringify(results.guestUi!(ada));
     expect(mine).toContain('1 of 2');
     expect(mine).toContain('pineapple');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('Nobody has answered yet');
+  });
+});
+
+describe('secret-word Dutch translations', () => {
+  it('has a Dutch word for every built-in word, shown in brackets only when it differs', () => {
+    const builtIn = words as string[];
+    expect(builtIn.every((w) => typeof dutchOf(w) === 'string' || dutchOf(w) === null)).toBe(true);
+    expect(builtIn.filter((w) => dutchOf(w) !== null).length).toBeGreaterThan(builtIn.length * 0.7);
+    expect(dutchOf('zucchini')).toBe('courgette');
+    expect(dutchOf('Zucchini')).toBe('courgette'); // the host typed it themselves
+    expect(dutchOf('zumba')).toBeNull(); // the same in Dutch
+    expect(dutchOf('karaoke-marathon')).toBeNull(); // not a built-in word
   });
 });

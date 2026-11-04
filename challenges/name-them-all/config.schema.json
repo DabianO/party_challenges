@@ -1,0 +1,60 @@
+{
+  "type": "object",
+  "required": ["prompt", "answers"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "title": "What to name",
+      "description": "e.g. \"Name the Mars rovers\"",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "answers": {
+      "type": "array",
+      "title": "Answers",
+      "description": "Every answer that counts. Alternatives: other accepted names, separated by commas. Points: leave empty for the standard points below.",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["answer"],
+        "properties": {
+          "answer": { "type": "string", "title": "Answer", "minLength": 1, "maxLength": 80 },
+          "alternatives": { "type": "string", "title": "Alternatives", "maxLength": 300 },
+          "points": { "type": "integer", "title": "Points", "minimum": 0, "maximum": 1000 }
+        }
+      }
+    },
+    "pointsEach": {
+      "type": "integer",
+      "title": "Standard points per answer",
+      "description": "For every answer without its own points.",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 1
+    },
+    "timeLimit": {
+      "type": "integer",
+      "title": "Time limit (seconds)",
+      "description": "Per player, from the moment they press Start.",
+      "maximum": 1800,
+      "default": 60,
+      "anyOf": [{ "const": 0, "title": "No time limit" }, { "minimum": 10 }]
+    },
+    "spelling": {
+      "type": "string",
+      "title": "Spelling mistakes",
+      "description": "Capitals, accents, spaces and hyphens never matter.",
+      "enum": ["exact", "normal", "loose"],
+      "enumNames": ["None allowed", "Small ones (e.g. persaverance for Perseverance)", "More (for long or hard names)"],
+      "default": "normal"
+    },
+    "showFound": {
+      "type": "boolean",
+      "title": "Show players which answers count while they play",
+      "description": "Off: players only see what they entered, and learn what counted with the results.",
+      "default": true
+    },
+    "media": { "type": "string", "format": "media-ref", "title": "Image (optional)" }
+  }
+}

@@ -67,6 +67,10 @@ export default defineModule<Config, State, Input, Evaluation>({
     return { config, options: buildOptions(config, ctx.players()), predictions: {} };
   },
 
+  timeLimit(state) {
+    return state.config.timeLimit > 0 ? state.config.timeLimit : null;
+  },
+
   onAttemptStart(state, player, ctx) {
     if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     return state;

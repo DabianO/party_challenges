@@ -52,7 +52,7 @@ ended) creates a clean copy (new code, no players or scores), e.g. to go from a 
 to the real party. The old game is kept; *Continue this game* brings an ended or closed
 game back to in progress with everyone's points.
 
-To try everything quickly, seed a demo game containing all twenty-five modules while `npm run dev`
+To try everything quickly, seed a demo game containing all twenty-eight modules while `npm run dev`
 is running. It prints the host, display and join URLs:
 
 ```bash
@@ -122,19 +122,22 @@ docs/                                    Architecture and module-authoring docum
 | `open-performance` | chaos | immediate | host (hybrid, peer) | host queue with points |
 | `prediction` | social | on close | automatic + host resolution | outcome resolved later by the host |
 | `multi-answer` ("Answer") | knowledge | immediate | automatic | one answer or several (a share of the points each, the remainder only for a full set); lenient text matching, numbers with a tolerance and unit in a number box |
+| `match-up` | knowledge | on close | automatic | two lists filled in side by side, both columns shuffled per player (`ui.pairMatch`); links are live actions, undo any time; leaving with everything linked locks it in (`lockOnLeave`); nothing shows what is right until the results; presentation reveals the right matches one by one |
+| `name-them-all` | knowledge | immediate | automatic | name as many as you can in the time (`ui.wordEntry`); forgiving about capitals, spaces, hyphens and small spelling mistakes (edit distance, by answer length, three settings); points per answer; entries count when the time runs out (`lockInput`); optionally hides what counts until the results |
+| `balloon-pop` | skill | on close | automatic | a balloon floats onto the big screen every few minutes (`displayOverlay`, `ui.aimField`, an instance timer that pauses with the game); everyone with it open steers one shared crosshair from a home base (`ui.dPad`, presses add up); first shot on the balloon pops it, a miss means a short reload; the crosshair stays where it is and every shot flashes, balloon or not |
 | `blob-war` | creativity | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle), the picture as a presentation slide |
 | `group-message` | creativity | immediate | automatic | one player at a time (`canStart`), strictly in turn whether or not their phone is awake (the turn moves on after its time), repeated attempts whose points add up (`attempts: "repeat"`), whose turn it is in the big screen's top bar (`displayBanner`), the message in readable parts as presentation slides |
 | `selfiemotion` | creativity | immediate | peer (automatic, host, hybrid) | a random emoji (evenly spread) to recreate in a selfie; presentation: four selfies a slide next to their emoji |
-| `fill-in-the-blanks` | creativity | immediate | automatic | sentences with blanks (`___`), points per completed sentence, players may stay anonymous (off by default); the latest sentence on the big screen while open, a new one a minute (`displayPanel`, own instance timer); presentation: everyone's entries rolling through the blanks (`ui.spool`) |
+| `fill-in-the-blanks` | creativity | immediate | automatic | sentences with blanks (`___`), points per completed sentence, Save keeps it open to finish later (`resubmission: "replace"`, `final: false` button), others' entries only once closed, players may stay anonymous (off by default); the latest sentence on the big screen while open, a new one a minute (`displayPanel`, own instance timer); presentation: everyone's entries rolling through the blanks (`ui.spool`) |
 | `sliding-scales` | social | on close | automatic | statements on a slider with min/max/interval/unit; answers are live actions (`ui.liveAnswer`), changeable until closed; big-screen spotlight with a histogram (`spotlight`, `ui.distribution`) |
 | `rivalries` | social | on close | automatic | two sides of a slider, optional meaning of the middle; like every Hot Take, all statements on one presentation slide (`presentation`) |
 | `binaries` | social | on close | automatic | yes/no statements (live answer buttons), two bars on the big screen |
 | `likelihoods` | social | on close | automatic | how likely, 0–100%, histogram with the average |
 | `agree-to-disagree` | social | on close | automatic | seven levels from fully agree to fully disagree |
 | `report-score` | other | immediate | automatic | the number a player fills in is their points (decided outside the app), up to a maximum; above it costs a penalty (not announced beforehand) and closes it for that player until the host reopens it (repeat attempts, `canStart` → `finished`, `playerNote` tone, `closedFor` / `reopenFor`) |
-| `secret-word` | creativity | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400, the host's own instead or added to it (with a chance for theirs to come next), left open while the player waits for the right moment |
+| `secret-word` | creativity | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400 with their Dutch translation in brackets, the host's own instead or added to it (with a chance for theirs to come next), left open while the player waits for the right moment |
 
-All twenty-five run on the same engine without engine changes (spec §21.3). Add your own by
+All twenty-eight run on the same engine without engine changes (spec §21.3). Add your own by
 creating a folder under `challenges/` — see the authoring guide.
 
 ## Scripts

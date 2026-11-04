@@ -19,6 +19,9 @@ import type {
   TapPadNode,
   StopwatchNode,
   LiveAnswerNode,
+  PairMatchNode,
+  WordEntryNode,
+  DPadNode,
   QuickRoundsNode,
   TextInputNode,
   TextNode,
@@ -41,6 +44,10 @@ import { LiveAnswer } from './LiveAnswer';
 import { Distribution } from './Distribution';
 import { QuickRounds } from './QuickRounds';
 import { Spool } from './Spool';
+import { PairMatch } from './PairMatch';
+import { WordEntry } from './WordEntry';
+import { DPad } from './DPad';
+import { AimField } from './AimField';
 
 /** Uploads a guest evidence file (FR-57) and resolves to its `media://` reference. */
 export type EvidenceUploader = (file: File) => Promise<{ ref: string; url?: string }>;
@@ -58,7 +65,7 @@ interface FormCtx {
   interactive: boolean;
   disabled: boolean;
   submitting: boolean;
-  submit(extra?: Payload, override?: Payload): void;
+  submit(extra?: Payload, override?: Payload, final?: boolean): void;
   /** Present on guest surfaces that may upload evidence for `file-input` nodes. */
   uploadEvidence?: EvidenceUploader;
   /** Present where live actions may be sent (`tap-pad`, `stopwatch` start). */
@@ -152,8 +159,8 @@ export function hasSubmitButton(node: UINode | null | undefined): boolean {
 
 export interface UIViewProps {
   node: UINode | null | undefined;
-  /** When given, inputs and buttons are live and submit through this callback. */
-  onSubmit?: (payload: Payload) => void | Promise<unknown>;
+  /** When given, inputs and buttons are live and submit through this callback (`final: false` keeps the attempt open). */
+  onSubmit?: (payload: Payload, opts: { final: boolean }) => void | Promise<unknown>;
   disabled?: boolean;
   timers?: TimerInfo[];
   clockOffset?: number;
@@ -188,10 +195,10 @@ export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, c
   const setValue = useCallback((name: string, value: unknown) => setEdits((e) => ({ ...e, [name]: value })), []);
 
   const submit = useCallback(
-    (extra?: Payload, override?: Payload) => {
+    (extra?: Payload, override?: Payload, final = true) => {
       if (!onSubmit || disabled || submitting) return;
       const payload = { ...buildPayload(inputs, { ...values, ...override }), ...extra };
-      const result = onSubmit(payload);
+      const result = onSubmit(payload, { final });
       if (result && typeof (result as Promise<unknown>).then === 'function') {
         setSubmitting(true);
         void (result as Promise<unknown>).finally(() => setSubmitting(false));
@@ -208,9 +215,11 @@ export function UIView({ node, onSubmit, disabled = false, timers = NO_TIMERS, c
 
   if (!node) return null;
 
+  // Enter in a text box: what the screen's first button does (e.g. Save rather than lock in).
   const onFormSubmit = (e: FormEvent) => {
     e.preventDefault();
-    submit();
+    const first = firstButton(node);
+    submit(first?.payload, undefined, first?.final !== false);
   };
 
   const body = <Node node={node} />;
@@ -237,6 +246,21 @@ function TapPadNodeView({ node }: { node: TapPadNode }) {
 function LiveAnswerNodeView({ node }: { node: LiveAnswerNode }) {
   const form = useContext(FormContext);
   return <LiveAnswer node={node} onAction={form.interactive ? form.action : undefined} />;
+}
+
+function PairMatchNodeView({ node }: { node: PairMatchNode }) {
+  const form = useContext(FormContext);
+  return <PairMatch node={node} onAction={form.interactive ? form.action : undefined} />;
+}
+
+function WordEntryNodeView({ node }: { node: WordEntryNode }) {
+  const form = useContext(FormContext);
+  return <WordEntry node={node} onAction={form.interactive ? form.action : undefined} />;
+}
+
+function DPadNodeView({ node }: { node: DPadNode }) {
+  const form = useContext(FormContext);
+  return <DPad node={node} onAction={form.interactive ? form.action : undefined} />;
 }
 
 function StopwatchNodeView({ node }: { node: StopwatchNode }) {
@@ -315,6 +339,14 @@ function Node({ node }: { node: UINode }) {
     case 'spool':
       // Another sentence starts afresh; new entries of the same sentence roll in.
       return <Spool key={node.parts.join('\u0000')} node={node} />;
+    case 'pair-match':
+      return <PairMatchNodeView node={node} />;
+    case 'word-entry':
+      return <WordEntryNodeView node={node} />;
+    case 'd-pad':
+      return <DPadNodeView node={node} />;
+    case 'aim-field':
+      return <AimField node={node} />;
     default: {
       // The server knows content this page does not: the page is older than the server
       // (opened before an update, or kept asleep in a phone's background). Reloading fixes it.
@@ -838,6 +870,14 @@ const BUTTON_TONE: Record<Tone, string> = {
   muted: 'btn-secondary',
 };
 
+function firstButton(node: UINode): ButtonNode | undefined {
+  let found: ButtonNode | undefined;
+  walkUI(node, (n) => {
+    if (!found && n.type === 'button') found = n;
+  });
+  return found;
+}
+
 function Button({ node }: { node: ButtonNode }) {
   const form = useContext(FormContext);
   const disabled = node.disabled === true || form.disabled || form.submitting;
@@ -847,7 +887,7 @@ function Button({ node }: { node: ButtonNode }) {
       className={`btn ${BUTTON_TONE[node.tone ?? 'primary']} btn-${node.size ?? 'md'}`}
       disabled={disabled}
       aria-busy={form.submitting || undefined}
-      onClick={() => form.submit(node.payload)}
+      onClick={() => form.submit(node.payload, undefined, node.final !== false)}
     >
       {form.submitting ? 'Sending…' : node.label}
     </button>

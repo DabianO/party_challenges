@@ -38,7 +38,7 @@ function contribute(state: ReturnType<typeof mod.createInstance>, ctx: InstanceC
 
 describe('group-message', () => {
   it('has a consistent manifest: automatic, immediate, repeated attempts', () => {
-    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.4.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.5.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -120,12 +120,12 @@ describe('group-message', () => {
   });
 
   it('shows in the top bar of the big screen whose turn it is, never the message', () => {
-    const { ctx } = fakeCtx([ada, bea]);
+    const { ctx } = fakeCtx([ada, { ...bea, color: '#3b82f6' }]);
     let state = mod.createInstance({ ...config, openingText: 'A secret beginning' }, ctx);
     expect(mod.displayBanner!(state, ctx)).toBeNull();
     state = mod.onPhaseChange!(state, 'ACTIVE', ctx);
     state = contribute(state, ctx, ada, 'Happy birthday');
-    expect(mod.displayBanner!(state, ctx)).toBe("✍️ Bea's turn to write: open your phone");
+    expect(mod.displayBanner!(state, ctx)).toEqual([{ text: '✍️ ' }, { text: 'Bea', color: '#3b82f6' }, { text: "'s turn to write: open your phone" }]);
     expect(mod.displayPanel).toBeUndefined();
     expect(mod.displayBanner!(mod.onPhaseChange!(state, 'LOCKED', ctx), ctx)).toBeNull();
   });

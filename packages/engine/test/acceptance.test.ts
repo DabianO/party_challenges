@@ -16,6 +16,7 @@ const CHALLENGES_DIR = resolve(import.meta.dirname, '../../../challenges');
 
 const EXPECTED_MODULES = [
   'agree-to-disagree',
+  'balloon-pop',
   'binaries',
   'blob-war',
   'caption-this',
@@ -26,8 +27,10 @@ const EXPECTED_MODULES = [
   'image-memory',
   'likelihoods',
   'majority-vote',
+  'match-up',
   'multi-answer',
   'multiple-choice',
+  'name-them-all',
   'numeric-answer',
   'open-performance',
   'photo-hunt',
@@ -155,6 +158,25 @@ const SCENARIOS: Record<string, Scenario> = {
     advanceBeforeSubmit: 2000,
   },
   // Hot Takes: answers are live actions on statements, changeable until the challenge closes.
+  // Live actions: the shared crosshair moves once the first balloon is up (half a minute after the start).
+  'balloon-pop': {
+    configuration: { intervalMinutes: 0.5, pointsPerPop: 1 },
+    advanceBeforeSubmit: 31_000,
+    inputs: () => ({}),
+    action: (i) => ({ aim: { move: [i + 1, -1] } }),
+  },
+  // Live actions: links on each player's own sheet (one of two pairs, so Lock in is refused); scored at the close.
+  'match-up': {
+    configuration: { pairs: [{ left: 'Paris', right: 'France' }, { left: 'Rome', right: 'Italy' }], pointsPerMatch: 2 },
+    inputs: () => ({}),
+    action: (i) => ({ link: { left: 'a0', right: `b${i % 2}` } }),
+  },
+  // Entries are live actions; "I'm done" submits nothing (the entries are in state).
+  'name-them-all': {
+    configuration: { prompt: 'Planets', answers: [{ answer: 'Mercury' }, { answer: 'Venus' }], pointsEach: 1, timeLimit: 60 },
+    prepare: { guess: 'venus' },
+    inputs: () => ({}),
+  },
   'sliding-scales': {
     configuration: { statements: [{ text: 'Shower minutes', min: 0, max: 60, unit: 'min' }], pointsPerAnswer: 1 },
     inputs: () => ({}),

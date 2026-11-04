@@ -48,13 +48,20 @@ export function lockTimer(entry: BoardEntry, meId: string) {
   return entry.timers.find((t) => t.tag === 'lock' && t.playerId === meId);
 }
 
-/** Start (or replay) a challenge and open it once the server has started the attempt. */
+/**
+ * Start (or replay) a challenge and open it once the server has started the attempt. A timed
+ * challenge first shows its time limit (`ReadyScreen`), which starts it with `confirmed`.
+ */
 export function useStartChallenge(ctx: PlayCtx) {
   const toast = useToast();
   const [starting, setStarting] = useState<string | null>(null);
-  const { sock, openChallenge } = ctx;
+  const { sock, openChallenge, askToStart, snapshot } = ctx;
   const start = useCallback(
-    async (instanceId: string) => {
+    async (instanceId: string, confirmed = false) => {
+      if (!confirmed && snapshot.board.find((b) => b.instanceId === instanceId)?.timeLimit) {
+        askToStart(instanceId);
+        return;
+      }
       setStarting(instanceId);
       const res = await sock.start(instanceId);
       setStarting(null);
@@ -62,7 +69,7 @@ export function useStartChallenge(ctx: PlayCtx) {
       if (res.ok) openChallenge(instanceId);
       else toast(res.reason ?? 'Could not start', 'danger');
     },
-    [sock, openChallenge, toast],
+    [sock, openChallenge, askToStart, snapshot, toast],
   );
   return { starting, start };
 }
@@ -138,7 +145,7 @@ function tileAction(entry: BoardEntry, revealed: boolean): TileAction {
 }
 
 function tileState(entry: BoardEntry, revealed: boolean): { icon: string; label: string } {
-  const again = entry.canReplay ? ' · tap to play again' : '';
+  const again = entry.canReplay ? ' · play again to improve' : '';
   // The module's own words (e.g. "Your turn!") win over the generic labels.
   if (entry.statusText && (entry.status === 'available' || entry.status === 'waiting')) {
     return { icon: entry.status === 'available' ? '▶' : '⏳', label: entry.statusText };
@@ -190,22 +197,38 @@ function Tile({
     else if (action === 'open') ctx.openChallenge(entry.instanceId);
   };
 
+  // Played, and may play again to do better: its own colour, so it does not look locked in.
+  const replayable = entry.canReplay && entry.status !== 'in_progress';
+  const sub = entry.title !== entry.moduleName ? entry.moduleName : null;
   return (
     <li>
       <button
         type="button"
-        className={`tile status-${entry.status}${playable ? ' is-playable' : ''}${entry.urgent ? ' is-urgent' : ''}${action === null ? ' is-inert' : ''}`}
+        className={`tile status-${entry.status}${playable ? ' is-playable' : ''}${replayable ? ' is-replayable' : ''}${entry.urgent ? ' is-urgent' : ''}${action === null ? ' is-inert' : ''}`}
         disabled={disabled}
         aria-busy={starting || undefined}
         onClick={onClick}
       >
-        <span className="tile-title">{entry.title}</span>
-        {entry.title !== entry.moduleName && <span className="tile-sub">{entry.moduleName}</span>}
-        <span className="tile-state">
-          <span aria-hidden="true">{state.icon}</span> {state.label}
+        <span className="tile-main">
+          <span className="tile-title">{entry.title}</span>
+          {(sub || entry.note) && (
+            <span className="tile-sub">
+              {sub}
+              {sub && entry.note && ' · '}
+              {entry.note && <span className={`tile-note${entry.noteTone ? ` tone-${entry.noteTone}` : ''}`}>{entry.note}</span>}
+            </span>
+          )}
+          <span className="tile-state">{state.label}</span>
         </span>
-        {entry.note && <span className={`tile-note${entry.noteTone ? ` tone-${entry.noteTone}` : ''}`}>{entry.note}</span>}
-        {timer && <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} size="sm" label="Time left" />}
+        <span className="tile-side">
+          {timer ? (
+            <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} size="sm" label="Time left" />
+          ) : (
+            <span className="tile-icon" aria-hidden="true">
+              {replayable && action !== null ? '↻' : state.icon}
+            </span>
+          )}
+        </span>
       </button>
     </li>
   );

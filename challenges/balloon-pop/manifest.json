@@ -1,0 +1,14 @@
+{
+  "id": "balloon-pop",
+  "name": "Balloon Pop",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "skill",
+  "description": "Every few minutes a balloon floats onto the big screen. Everyone who has this challenge open steers one shared crosshair with the arrows on their phone; whoever shoots first while it is on the balloon pops it and wins a point.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 600 },
+  "capabilities": ["real-time-burst", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

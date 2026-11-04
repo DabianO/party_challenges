@@ -85,6 +85,7 @@ Every response carries a strict `Content-Security-Policy`, `X-Frame-Options: DEN
 | `close-challenge` `{instanceId}` | ACTIVE → LOCKED: running attempts lock, `onClose` modules are evaluated, immediate modules reach RESULTS once nothing is pending |
 | `reopen-challenge` `{instanceId}` | LOCKED/EVALUATING/RESULTS → ACTIVE. Players who played keep their result. For `onClose` modules the points awarded at the close are reversed (they are awarded again at the next close), and live-action ones (Hot Takes, Blob War) give players the attempt the close ended back |
 | `reopen-all-challenges` | The same for every closed challenge at once (e.g. after `reopen-game`) |
+| `reset-all-challenges` | `reset-challenge` for every challenge at once (players and the game stay) |
 | `reset-challenge` `{instanceId}` | Reverse all points for the instance, wipe attempts/submissions/assignments, re-open |
 | `reopen-for-player` `{instanceId, playerId}` | Give one player another go at a challenge the module closed for them (listed in the host-only `closedFor` of the challenge summary); points already earned or deducted stay |
 | `assign-challenge` `{instanceId, playerIds}` | Make the instance available to specific players only |

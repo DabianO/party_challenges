@@ -30,7 +30,6 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
 
   const running = game.status === 'IN_PROGRESS';
   const finished = game.status === 'GAME_RESULTS' || game.status === 'FINISHED';
-  const closedCount = challenges.filter((c) => c.phase === 'LOCKED' || c.phase === 'EVALUATING' || c.phase === 'RESULTS').length;
   const attention = attentionCount(ctx);
 
   return (
@@ -83,17 +82,6 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
                 ❙❙ Pause
               </button>
             ))}
-          {running && closedCount > 0 && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={busy}
-              title="Open every closed challenge again. Players who played keep their result; Hot Takes and Blob War carry on where they were and are scored again when you close them."
-              onClick={() => void act({ action: 'reopen-all-challenges' }, `Open all ${closedCount} closed challenges again?`)}
-            >
-              ↺ Reopen all closed challenges ({closedCount})
-            </button>
-          )}
           {running && (
             <button
               type="button"

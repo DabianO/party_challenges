@@ -26,6 +26,8 @@
   --silver: #c9d1e3;
   --bronze: #d99058;
   --tap: 44px;
+  --replay: #3b82f6;
+  --replay-text: #93c5fd;
   color-scheme: dark;
 }
 
@@ -44,6 +46,7 @@
   --gold: #b8860b;
   --silver: #6b7280;
   --bronze: #9a5b2a;
+  --replay-text: #1d4ed8;
   color-scheme: light;
 }
 
@@ -2276,20 +2279,21 @@ details[open] > summary::before {
   text-transform: uppercase;
   color: var(--text-muted);
 }
+/* One column of rectangular tiles, all the same height whatever they say. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
 .tile {
   width: 100%;
-  min-height: 116px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 14px;
+  height: 112px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  padding: 12px 14px;
   text-align: left;
   font: inherit;
   color: inherit;
@@ -2324,7 +2328,6 @@ details[open] > summary::before {
 .tile.is-urgent,
 .tile.is-urgent.is-playable,
 .tile.is-urgent.status-in_progress {
-  min-height: 0;
   border-color: var(--success-text);
   background: color-mix(in srgb, var(--success) 26%, var(--surface));
   animation: urgent-pulse 1.6s ease-in-out infinite;
@@ -2361,11 +2364,29 @@ details[open] > summary::before {
 .tile.status-closed {
   opacity: 0.6;
 }
+.tile-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+}
 .tile-title {
   font-size: 1.1rem;
   font-weight: 800;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  /* At most two lines, so every tile keeps its size. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tile-sub,
+.tile-state {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tile-sub {
   color: var(--text-muted);
@@ -2376,6 +2397,46 @@ details[open] > summary::before {
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--text-muted);
+}
+.tile-side {
+  display: grid;
+  place-items: center;
+  min-width: 48px;
+}
+.tile-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.tile.is-playable .tile-icon {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.tile.status-in_progress .tile-icon {
+  background: color-mix(in srgb, var(--warning) 45%, var(--surface));
+  color: var(--warning-text);
+}
+.tile.status-scored .tile-icon {
+  color: var(--success-text);
+}
+/* Played, and may play again to improve: blue, never mistaken for locked in. */
+.tile.is-replayable {
+  border-color: var(--replay);
+  background: color-mix(in srgb, var(--replay) 18%, var(--surface));
+}
+.tile.is-replayable .tile-state,
+.tile.is-replayable.is-playable .tile-state {
+  color: var(--replay-text);
+}
+.tile.is-replayable .tile-icon {
+  background: var(--replay);
+  color: #fff;
 }
 .tile-note {
   font-family: var(--mono);
@@ -3236,6 +3297,11 @@ body.has-bg-image .challenge-top {
   min-height: 220px;
   border-radius: var(--radius-sm);
   overflow: hidden;
+}
+/* In a big-screen panel the frame is the panel: never taller (it would overflow off-centre). */
+.race-panel-body .blob-field,
+.artwork-body .blob-field {
+  min-height: 0;
 }
 /* Out of the flow, so the canvas can never resize the frame it measures. */
 .blob-field canvas {
@@ -4151,4 +4217,489 @@ body.has-bg-image .challenge-top {
   .quick-time span {
     animation-duration: var(--round-ms) !important;
   }
+}
+
+/* ==========================================================================
+   Pair match (Match Up): two columns linked item by item
+   ========================================================================== */
+.pair-match {
+  display: grid;
+  gap: 10px;
+}
+.pair-heads,
+.pair-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+}
+.pair-heads {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.pair-heads span:last-child {
+  text-align: right;
+}
+.pair-columns {
+  position: relative;
+  align-items: stretch;
+}
+.pair-column {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.pair-lines {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.pair-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    transform 0.08s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.pair-right {
+  justify-content: flex-end;
+  text-align: right;
+}
+.pair-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pair-item:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.pair-item.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.pair-item.is-linked {
+  border-color: var(--pair-color);
+  background: color-mix(in srgb, var(--pair-color) 14%, var(--surface));
+}
+.pair-item:disabled {
+  cursor: default;
+}
+.pair-chip {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--pair-color);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+.pair-hint {
+  margin: 0;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Word entry (Name Them All): one answer after another
+   ========================================================================== */
+.word-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.word-entry .btn {
+  min-height: 52px;
+}
+
+/* ==========================================================================
+   Direction pad (Balloon Pop): four arrows around a fire button
+   ========================================================================== */
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    '. up .'
+    'left fire right'
+    '. down .';
+  gap: 10px;
+  width: min(100%, 340px);
+  margin: 0 auto;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dpad-btn {
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 2rem;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.06s ease,
+    background 0.06s ease;
+}
+.dpad-btn:active:not(:disabled) {
+  transform: scale(0.94);
+  background: color-mix(in srgb, var(--accent) 30%, var(--surface-2));
+}
+.dpad-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.dpad-up {
+  grid-area: up;
+}
+.dpad-down {
+  grid-area: down;
+}
+.dpad-left {
+  grid-area: left;
+}
+.dpad-right {
+  grid-area: right;
+}
+.dpad-fire {
+  grid-area: fire;
+  border-radius: 50%;
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--danger) 55%, #000);
+}
+.dpad-fire:active:not(:disabled) {
+  transform: translateY(4px);
+  background: var(--danger);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--danger) 55%, #000);
+}
+
+/* ==========================================================================
+   Display overlay + aim field (Balloon Pop): drawn over the whole big screen
+   ========================================================================== */
+.display-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.display-overlay-box {
+  width: min(100vw, calc(100vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+}
+.display-overlay-box > .ui-root {
+  width: 100%;
+  height: 100%;
+}
+.aim-field {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  container-type: inline-size;
+}
+.aim-home {
+  position: absolute;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 3px dashed rgba(255, 255, 255, 0.55);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.aim-target {
+  position: absolute;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+}
+.balloon {
+  position: absolute;
+  inset: -6% 4% 6% 4%;
+  border-radius: 50% 50% 48% 48% / 56% 56% 44% 44%;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.75) 0 7%, rgba(255, 255, 255, 0) 22%),
+    radial-gradient(circle at 50% 45%, var(--target-color), color-mix(in srgb, var(--target-color) 60%, #000) 100%);
+  box-shadow: 0 1.2cqi 2.4cqi rgba(0, 0, 0, 0.35);
+  animation: balloon-float 5s ease-in-out infinite alternate;
+  animation-delay: var(--float-delay, 0s);
+}
+.balloon::before {
+  /* The knot. */
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5%;
+  width: 10%;
+  height: 7%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--target-color) 70%, #000);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.balloon::after {
+  /* The string. */
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 102%;
+  width: 2px;
+  height: 70%;
+  background: rgba(255, 255, 255, 0.6);
+  transform-origin: top;
+  animation: balloon-string 2.5s ease-in-out infinite alternate;
+}
+@keyframes balloon-float {
+  from {
+    transform: translate(-3%, -4%) rotate(-3deg);
+  }
+  to {
+    transform: translate(3%, 4%) rotate(3deg);
+  }
+}
+@keyframes balloon-string {
+  from {
+    transform: rotate(-6deg);
+  }
+  to {
+    transform: rotate(6deg);
+  }
+}
+.aim-crosshair {
+  position: absolute;
+  width: 4.5%;
+  transform: translate(-50%, -50%);
+  transition:
+    left 0.25s linear,
+    top 0.25s linear;
+  overflow: visible;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9));
+}
+.aim-crosshair circle,
+.aim-crosshair path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.aim-crosshair .aim-dot {
+  fill: #ff3b3b;
+  stroke: none;
+}
+.aim-burst {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+}
+.aim-burst-ring {
+  grid-area: 1 / 1;
+  width: 9cqi;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 0.8cqi dotted var(--target-color);
+  animation: burst-ring 0.6s ease-out forwards;
+}
+.aim-burst-text {
+  grid-area: 1 / 1;
+  padding: 0.4cqi 1.2cqi;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 2.6cqi;
+  font-weight: 800;
+  white-space: nowrap;
+  animation: burst-text 4s ease-out forwards;
+}
+@keyframes burst-ring {
+  from {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+@keyframes burst-text {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  10% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  20%,
+  80% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-2cqi);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Without motion the pop is a still label (it leaves when the server clears it). */
+  .aim-burst-text {
+    animation: none !important;
+  }
+  .aim-burst-ring {
+    display: none;
+  }
+}
+.aim-shot {
+  position: absolute;
+  width: 7cqi;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+}
+.aim-shot-flash {
+  grid-area: 1 / 1;
+  width: 60%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 20%, #ffd166 35%, rgba(255, 120, 40, 0.6) 55%, rgba(255, 80, 0, 0) 70%);
+  animation: shot-flash 0.35s ease-out forwards;
+}
+.aim-shot-ring {
+  grid-area: 1 / 1;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 0.35cqi solid rgba(255, 255, 255, 0.85);
+  animation: shot-ring 0.5s ease-out forwards;
+}
+@keyframes shot-flash {
+  from {
+    transform: scale(0.3) rotate(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.4) rotate(45deg);
+    opacity: 0;
+  }
+}
+@keyframes shot-ring {
+  from {
+    transform: scale(0.2);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+
+/* ==========================================================================
+   Run tab: compact challenge list, sortable by category
+   ========================================================================== */
+.challenge-control {
+  padding: 8px 12px;
+}
+.challenge-control-main {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.challenge-control-info {
+  min-width: 0;
+}
+.challenge-control .challenge-index {
+  width: 24px;
+  height: 24px;
+  font-size: 0.8rem;
+}
+.challenge-control .challenge-actions {
+  padding-left: 34px;
+}
+@media (min-width: 900px) {
+  .challenge-control.stack {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+  }
+  .challenge-control-main {
+    flex: 1 1 420px;
+  }
+  .challenge-control .challenge-actions {
+    flex: 0 1 auto;
+    justify-content: flex-end;
+    padding-left: 0;
+  }
+  .challenge-control > :not(.challenge-control-main):not(.challenge-actions) {
+    flex-basis: 100%;
+  }
+}
+.challenge-toolbar {
+  padding: 2px 0;
+}
+.segmented {
+  display: inline-flex;
+}
+.segmented .btn {
+  border-radius: 0;
+}
+.segmented .btn:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.segmented .btn:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.run-group-title {
+  margin: 10px 0 2px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.header-banner-color {
+  font-weight: 900;
+  text-shadow:
+    0 0 10px color-mix(in srgb, currentColor 55%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+/* Before a timed challenge: how long the player will have ------------------- */
+.ready-card {
+  border-color: var(--warning-text);
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+}
+.ready-time {
+  margin: 4px 0;
+  font-size: clamp(1.8rem, 9vw, 2.6rem);
+  font-weight: 900;
+  color: var(--warning-text);
+  font-variant-numeric: tabular-nums;
 }

@@ -15,6 +15,7 @@ import type { PlayerSession } from '../lib/storage';
 import { formatPoints } from '../lib/time';
 import { BoardScreen } from './play/BoardScreen';
 import { ChallengeScreen } from './play/ChallengeScreen';
+import { ReadyScreen } from './play/ReadyScreen';
 import { FinalScreen } from './play/FinalScreen';
 import { JudgeScreen } from './play/JudgeScreen';
 import { LobbyScreen } from './play/LobbyScreen';
@@ -36,6 +37,8 @@ export interface PlayCtx {
   uploadAvatar(image: Blob): Promise<void>;
   removeAvatar(): Promise<void>;
   openChallenge(instanceId: string): void;
+  /** A timed challenge: first the warning with its time limit (Start or back). */
+  askToStart(instanceId: string): void;
   closeChallenge(): void;
   openJudging(): void;
   closeJudging(): void;
@@ -122,17 +125,31 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   const [editingAvatar, setEditingAvatar] = useState(false);
 
   const challengeId = params.get('challenge');
+  const readyId = params.get('ready');
   const judging = params.get('judge') === '1';
   // A challenge (or the judging screen) opens at its top, not where the board was scrolled to.
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [challengeId, judging]);
+  }, [challengeId, readyId, judging]);
 
   const openChallenge = useCallback(
     (instanceId: string) => {
       setParams((p) => {
         const next = new URLSearchParams(p);
         next.set('challenge', instanceId);
+        next.delete('ready');
+        next.delete('judge');
+        return next;
+      });
+    },
+    [setParams],
+  );
+  const askToStart = useCallback(
+    (instanceId: string) => {
+      setParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set('ready', instanceId);
+        next.delete('challenge');
         next.delete('judge');
         return next;
       });
@@ -143,6 +160,7 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
     setParams((p) => {
       const next = new URLSearchParams(p);
       next.delete('challenge');
+      next.delete('ready');
       next.delete('judge');
       return next;
     });
@@ -163,8 +181,8 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   }, [setParams]);
 
   const ctx = useMemo<PlayCtx | null>(
-    () => (snapshot ? { snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, closeChallenge, openJudging, closeJudging } : null),
-    [snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, closeChallenge, openJudging, closeJudging],
+    () => (snapshot ? { snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, askToStart, closeChallenge, openJudging, closeJudging } : null),
+    [snapshot, meId, sock, uploadEvidence, uploadAvatar, removeAvatar, openChallenge, askToStart, closeChallenge, openJudging, closeJudging],
   );
 
   if (fatal?.kind === 'removed') {
@@ -234,14 +252,14 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
             Loading…
           </p>
         ) : (
-          <PlayBody ctx={ctx} challengeId={challengeId} judging={judging} />
+          <PlayBody ctx={ctx} challengeId={challengeId} readyId={readyId} judging={judging} />
         )}
       </main>
     </div>
   );
 }
 
-function PlayBody({ ctx, challengeId, judging }: { ctx: PlayCtx; challengeId: string | null; judging: boolean }) {
+function PlayBody({ ctx, challengeId, readyId, judging }: { ctx: PlayCtx; challengeId: string | null; readyId: string | null; judging: boolean }) {
   const status = ctx.snapshot.game.status;
   switch (status) {
     case 'DRAFT':
@@ -249,6 +267,7 @@ function PlayBody({ ctx, challengeId, judging }: { ctx: PlayCtx; challengeId: st
       return <LobbyScreen ctx={ctx} />;
     case 'IN_PROGRESS':
       if (judging) return <JudgeScreen ctx={ctx} />;
+      if (readyId) return <ReadyScreen ctx={ctx} instanceId={readyId} />;
       if (challengeId) return <ChallengeScreen ctx={ctx} instanceId={challengeId} />;
       return <BoardScreen ctx={ctx} />;
     case 'GAME_RESULTS':

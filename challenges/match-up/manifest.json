@@ -1,0 +1,14 @@
+{
+  "id": "match-up",
+  "name": "Match Up",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "knowledge",
+  "description": "Two lists to match, e.g. capitals and their countries. Every player gets their own shuffle: link each item on the left to one on the right and undo links as often as you like. Nobody sees what is right until the results.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 90 },
+  "capabilities": ["multiple-choice", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "onClose",
+  "resubmission": "none"
+}

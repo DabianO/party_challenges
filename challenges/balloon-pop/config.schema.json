@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "intervalMinutes": {
+      "type": "number",
+      "title": "Minutes between balloons",
+      "description": "The first balloon comes this long after the challenge opens, every next one this long after the last one popped.",
+      "minimum": 0.5,
+      "maximum": 60,
+      "multipleOf": 0.5,
+      "default": 5
+    },
+    "pointsPerPop": {
+      "type": "integer",
+      "title": "Points per popped balloon",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 1
+    },
+    "speed": {
+      "type": "string",
+      "title": "Crosshair speed",
+      "description": "How far one arrow press moves the crosshair.",
+      "enum": ["slow", "normal", "fast"],
+      "enumNames": ["Slow (precise)", "Normal", "Fast"],
+      "default": "normal"
+    }
+  }
+}

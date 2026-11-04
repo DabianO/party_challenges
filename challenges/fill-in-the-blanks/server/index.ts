@@ -1,12 +1,17 @@
 /**
  * Fill in the Blanks (contract v2, automatic, `results: "immediate"`).
  *
- * The host writes sentences with blanks (`___`); every player fills them in however they like
- * and submits once. There is no right answer: every completed sentence earns
+ * The host writes sentences with blanks (`___`); every player fills them in however they like.
+ * Save keeps the challenge open (`resubmission: "replace"`, a non-final submit): players can go
+ * back to the board and add the other sentences later; "Done" (or the time limit, or the host
+ * closing it) locks them in. There is no right answer: every completed sentence earns
  * `pointsPerSentence`. Players choose whether their name goes with their entries (it does
  * unless they tick "anonymous"). Once closed, the host can show the results on the big screen
  * (`presentation`): one slide per sentence, with everyone's entries rolling through its blanks
  * (`ui.spool`), one entry per step.
+ *
+ * Until it closes, a player's results show only their own sentences: everyone's entries are
+ * for the presentation and the end.
  *
  * While it is open, the big screen shows one completed sentence at a time (`displayPanel`):
  * the first as soon as it comes in, then every minute the next one that was added since. When
@@ -126,6 +131,10 @@ export default defineModule<Config, State, Input, Evaluation>({
     return shown !== null && shown < feed.length - 1 ? { ...state, shown: shown + 1 } : state;
   },
 
+  timeLimit(state) {
+    return state.config.timeLimit > 0 ? state.config.timeLimit : null;
+  },
+
   onAttemptStart(state, player, ctx) {
     if (state.config.timeLimit > 0) ctx.schedule('lock', state.config.timeLimit, player.id); // 0 = no time limit
     const { [player.id]: _previous, ...entries } = state.entries;
@@ -148,7 +157,9 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   handleInput(state, player, input) {
     const words = wordsOf(state, input);
-    const feed = [...(state.feed ?? []), ...words.flatMap((w, sentence) => (complete(w) ? [{ playerId: player.id, sentence }] : []))];
+    // Every save holds all the sentences; only the ones completed for the first time join the feed.
+    const known = new Set((state.feed ?? []).filter((f) => f.playerId === player.id).map((f) => f.sentence));
+    const feed = [...(state.feed ?? []), ...words.flatMap((w, sentence) => (complete(w) && !known.has(sentence) ? [{ playerId: player.id, sentence }] : []))];
     return {
       ...state,
       entries: { ...state.entries, [player.id]: words },
@@ -201,15 +212,16 @@ export default defineModule<Config, State, Input, Evaluation>({
       [
         ui.text(`Fill in the blanks of ${n === 1 ? 'a sentence' : `${n} sentences`}, however you like: there is no right answer.`),
         ui.caption(
-          `${c.pointsPerSentence > 0 ? `${plural(c.pointsPerSentence, 'point')} for every sentence you complete. ` : ''}${c.timeLimit > 0 ? `You have ${c.timeLimit} seconds. ` : ''}You submit once, so make them good: they may end up on the big screen.`,
+          `${c.pointsPerSentence > 0 ? `${plural(c.pointsPerSentence, 'point')} for every sentence you complete. ` : ''}${c.timeLimit > 0 ? `You have ${c.timeLimit} seconds. ` : ''}Save as you go and come back later; they may end up on the big screen.`,
         ),
       ],
       { gap: 'sm' },
     );
   },
 
-  guestView(state) {
+  guestView(state, player) {
     const c = state.config;
+    const saved = state.entries[player.id];
     const cards: UINode[] = sentencesOf(c).map((parts, i) => {
       const blanks = parts.length - 1;
       const numbered = blanks > 1 ? parts.map((p, j) => (j < blanks ? `${p}___(${j + 1})` : p)).join('') : filled(parts);
@@ -217,7 +229,13 @@ export default defineModule<Config, State, Input, Evaluation>({
         ui.caption(`Sentence ${i + 1} of ${c.sentences.length}`),
         ui.text(numbered.trim(), { variant: 'subtitle' }),
         ...Array.from({ length: blanks }, (_, j) =>
-          ui.textInput(field(i, j), { label: blanks > 1 ? `Blank ${j + 1}` : 'Your words', maxLength: MAX_WORDS, placeholder: blanks > 1 ? `Words for blank ${j + 1}` : 'Fill in the blank' }),
+          ui.textInput(field(i, j), {
+            label: blanks > 1 ? `Blank ${j + 1}` : 'Your words',
+            maxLength: MAX_WORDS,
+            placeholder: blanks > 1 ? `Words for blank ${j + 1}` : 'Fill in the blank',
+            // What the player saved before, when they come back.
+            ...(saved?.[i]?.[j] ? { value: saved[i]![j]! } : {}),
+          }),
         ),
       ]);
     });
@@ -226,20 +244,30 @@ export default defineModule<Config, State, Input, Evaluation>({
       ? [
           ui.card(
             [
-              ui.toggle(ANONYMOUS, 'Stay anonymous', { value: false }),
+              ui.toggle(ANONYMOUS, 'Stay anonymous', { value: state.anonymous?.[player.id] === true }),
               ui.caption('Your name is shown with your sentences on the big screen. Switch this on to leave it off.'),
             ],
             'primary',
           ),
         ]
       : [];
+    const done = saved?.filter(complete).length ?? 0;
+    const several = c.sentences.length > 1;
     return {
-      ui: ui.stack([...(c.timeLimit > 0 ? [ui.timer('lock')] : []), ...name, ...cards, ui.submit(c.sentences.length > 1 ? 'Submit my sentences' : 'Submit', { size: 'lg' })], {
-        gap: 'md',
-        align: 'stretch',
-      }),
+      ui: ui.stack(
+        [
+          ...(c.timeLimit > 0 ? [ui.timer('lock')] : []),
+          ...name,
+          ...cards,
+          // First, so Enter in a box saves rather than locks in.
+          ui.submit(several ? '💾 Save: I will add more later' : '💾 Save', { final: false, tone: 'neutral' }),
+          ui.submit(several ? 'Done: lock in my sentences' : 'Done: lock it in', { size: 'lg' }),
+          ui.caption('Save keeps this open: go back to the other challenges and finish it later.', { align: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      ),
       canSubmit: true,
-      status: 'Fill in the blanks, then submit once',
+      status: saved ? `${done} of ${plural(c.sentences.length, 'sentence')} saved · come back any time` : 'Fill in the blanks: save, or lock them in',
     };
   },
 
@@ -309,6 +337,11 @@ export default defineModule<Config, State, Input, Evaluation>({
         const head: UINode = me
           ? ui.card([ui.text(`You completed ${plural(me.completed, 'sentence')}: +${me.points} points`, { align: 'center' })], 'success')
           : ui.badge('You did not play this one', 'muted');
+        // Everyone's entries only once it is closed: until then, just the player's own.
+        if (state.open) {
+          const mine = me ? sentences.map((parts, i) => ui.text(filled(parts, me.blanks[i]))) : [];
+          return ui.stack([head, ...mine, ui.caption('Everyone’s sentences appear here once this challenge is closed.', { align: 'center' })], { gap: 'md', align: 'stretch' });
+        }
         return ui.stack([head, ...sentences.map((parts, i) => section(parts, i, player.id))], { gap: 'lg', align: 'stretch' });
       },
     };

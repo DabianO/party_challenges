@@ -6,6 +6,9 @@ import captionThis from '../../../challenges/caption-this/server/index.ts';
 import groupMessage from '../../../challenges/group-message/server/index.ts';
 import blobWar from '../../../challenges/blob-war/server/index.ts';
 import reportScore from '../../../challenges/report-score/server/index.ts';
+import nameThemAll from '../../../challenges/name-them-all/server/index.ts';
+import matchUp from '../../../challenges/match-up/server/index.ts';
+import balloonPop from '../../../challenges/balloon-pop/server/index.ts';
 
 import { createFakeTime } from './helpers.ts';
 
@@ -16,6 +19,9 @@ function setup(random: () => number = () => 0) {
   registry.register(groupMessage as never, null);
   registry.register(blobWar as never, null);
   registry.register(reportScore as never, null);
+  registry.register(nameThemAll as never, null);
+  registry.register(matchUp as never, null);
+  registry.register(balloonPop as never, null);
   const time = createFakeTime();
   const events: GameEvent[] = [];
   const kicked: string[] = [];
@@ -513,6 +519,138 @@ describe('board lifecycle', () => {
     expect(game.ledger.filter((r) => r.challengeInstanceId === inst.id).map((r) => [r.playerId, r.points])).toEqual([[ada!.id, 10]]);
     expect(game.doc.activity.some((a) => a.text.includes('ran out of time'))).toBe(false);
     expect(game.moduleAction(ada!.id, inst.id, { pump: 1 })).toMatchObject({ ok: false });
+  });
+
+  it('scores answers given as live actions when the time runs out (module lockInput)', () => {
+    const { engine, time, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Names' });
+    const inst = game.addChallenge('name-them-all', { prompt: 'Planets', answers: [{ answer: 'Mercury' }, { answer: 'Venus', points: 3 }], pointsEach: 1, timeLimit: 30 });
+    game.performHostAction({ action: 'open-lobby' });
+    const [ada, bea, cyd] = ['Ada', 'Bea', 'Cyd'].map((n) => game.join(n).player);
+    for (const p of [ada!, bea!, cyd!]) game.connect({ role: 'player', playerId: p.id });
+    game.performHostAction({ action: 'start-game' });
+    for (const p of [ada!, bea!, cyd!]) expect(game.startAttempt(p.id, inst.id)).toEqual({ ok: true });
+    expect(game.moduleAction(ada!.id, inst.id, { guess: 'venis' })).toEqual({ ok: true });
+    expect(game.moduleAction(ada!.id, inst.id, { guess: 'Mercury' })).toEqual({ ok: true });
+    expect(game.moduleAction(cyd!.id, inst.id, { guess: 'Mercury' })).toEqual({ ok: true });
+
+    // Ada and Bea run out of time: Ada's entries become her submission, Bea entered nothing.
+    time.advance(31_000);
+    expect(game.attemptOf(inst.id, ada!.id)?.status).toBe('scored');
+    expect(game.attemptOf(inst.id, bea!.id)?.status).toBe('locked');
+    expect(game.doc.submissions.map((s) => s.playerId).sort()).toEqual([ada!.id, cyd!.id].sort());
+    expect(lastSnapshot(events, `player:${bea!.id}`).board[0]!.status).toBe('missed');
+    expect(game.ledger.filter((r) => r.challengeInstanceId === inst.id).map((r) => [r.playerId, r.points]).sort()).toEqual(
+      [
+        [ada!.id, 4],
+        [cyd!.id, 1],
+      ].sort(),
+    );
+  });
+
+  it('scores what was entered when the host closes the challenge mid-attempt', () => {
+    const { engine } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Names' });
+    const inst = game.addChallenge('name-them-all', { prompt: 'Planets', answers: [{ answer: 'Mercury' }], pointsEach: 2, timeLimit: 0 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.performHostAction({ action: 'start-game' });
+    game.startAttempt(ada.id, inst.id);
+    game.moduleAction(ada.id, inst.id, { guess: 'mercury' });
+    game.performHostAction({ action: 'close-challenge', instanceId: inst.id });
+    expect(game.ledger.filter((r) => r.challengeInstanceId === inst.id).map((r) => r.points)).toEqual([2]);
+  });
+
+  it('offers to lock in on leaving only while the module says so (lockOnLeave)', () => {
+    const { engine, time, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Match' });
+    const inst = game.addChallenge('match-up', { pairs: [{ left: 'Paris', right: 'France' }, { left: 'Rome', right: 'Italy' }], pointsPerMatch: 2 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+    game.startAttempt(ada.id, inst.id);
+    const entry = () => lastSnapshot(events, `player:${ada.id}`).board[0]!;
+    expect(entry()).toMatchObject({ status: 'in_progress', canSubmit: false, lockOnLeave: false });
+    game.moduleAction(ada.id, inst.id, { link: { left: 'a0', right: 'b0' } });
+    game.moduleAction(ada.id, inst.id, { link: { left: 'a1', right: 'b1' } });
+    time.advance(300);
+    expect(entry()).toMatchObject({ canSubmit: true, lockOnLeave: true });
+    game.performHostAction({ action: 'pause' });
+    expect(entry()).toMatchObject({ canSubmit: false, lockOnLeave: false });
+    game.performHostAction({ action: 'resume' });
+    // Leaving the screen submits an empty payload, final: the matches are locked in.
+    expect(game.submit(ada.id, inst.id, {}, true)).toEqual({ ok: true });
+    expect(entry()).toMatchObject({ status: 'submitted', lockOnLeave: false });
+    expect(game.moduleAction(ada.id, inst.id, { link: { left: 'a0', right: null } })).toMatchObject({ ok: false });
+  });
+
+  it('draws a module layer over the main display only, while open (displayOverlay)', () => {
+    const { engine, time, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Balloons' });
+    const inst = game.addChallenge('balloon-pop', { intervalMinutes: 1, pointsPerPop: 2 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'main' });
+    game.connect({ role: 'host' });
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+    const overlay = () => lastSnapshot(events, 'main').challenges.find((c) => c.id === inst.id)!.displayOverlay as { type: string; targets: unknown[] } | null;
+    expect(overlay()).toMatchObject({ type: 'aim-field', targets: [] });
+    game.startAttempt(ada.id, inst.id);
+
+    // Paused time does not count towards the next balloon.
+    time.advance(30_000);
+    game.performHostAction({ action: 'pause' });
+    time.advance(60_000);
+    expect(overlay()!.targets).toHaveLength(0);
+    game.performHostAction({ action: 'resume' });
+    time.advance(30_001);
+    expect(overlay()!.targets).toHaveLength(1);
+    expect(lastSnapshot(events, `player:${ada.id}`).challenges.find((c) => c.id === inst.id)!.displayOverlay).toBeUndefined();
+    expect(lastSnapshot(events, 'host').challenges.find((c) => c.id === inst.id)!.displayOverlay).toBeUndefined();
+
+    expect(game.moduleAction(ada.id, inst.id, { aim: { move: [1, 0] } })).toEqual({ ok: true });
+    game.performHostAction({ action: 'close-challenge', instanceId: inst.id });
+    expect(overlay()).toBeNull();
+    expect(inst.phase).toBe('RESULTS');
+  });
+
+  it('tells the player the time limit before they start (module timeLimit)', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Timed' });
+    const timed = game.addChallenge('closest-number', CLOSEST);
+    const untimed = game.addChallenge('closest-number', { ...CLOSEST, timeLimit: 0 });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'player', playerId: ada.id });
+    game.performHostAction({ action: 'start-game' });
+    const entry = (id: string) => lastSnapshot(events, `player:${ada.id}`).board.find((b) => b.instanceId === id)!;
+    expect(entry(timed.id).timeLimit).toBe(30);
+    expect(entry(untimed.id).timeLimit).toBeNull();
+    game.startAttempt(ada.id, timed.id);
+    expect(entry(timed.id).timeLimit).toBeNull(); // only while it can be started
+  });
+
+  it('resets every challenge at once, reversing all their points', () => {
+    const { engine } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Reset all' });
+    const a = game.addChallenge('closest-number', CLOSEST);
+    const b = game.addChallenge('closest-number', { ...CLOSEST, question: 'Other jar' });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.performHostAction({ action: 'start-game' });
+    for (const inst of [a, b]) {
+      game.startAttempt(ada.id, inst.id);
+      game.submit(ada.id, inst.id, { answer: 137 }, true);
+      game.performHostAction({ action: 'close-challenge', instanceId: inst.id });
+    }
+    expect(game.ledger.reduce((t, r) => t + r.points, 0)).toBeGreaterThan(0);
+    expect(game.performHostAction({ action: 'reset-all-challenges' })).toMatchObject({ ok: true, message: '2 challenges reset' });
+    expect(game.ledger.reduce((t, r) => t + r.points, 0)).toBe(0);
+    expect(game.doc.attempts).toEqual([]);
+    expect([a.phase, b.phase]).toEqual(['ACTIVE', 'ACTIVE']);
+    expect(game.doc.players.map((p) => p.id)).toEqual([ada.id]);
   });
 
   it('lets the host change everything while nobody has played a challenge, also after a reset', () => {

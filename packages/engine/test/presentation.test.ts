@@ -178,7 +178,8 @@ describe('the results presentation', () => {
     game.connect({ role: 'player', playerId: ada.id });
     game.performHostAction({ action: 'start-game' });
     const banner = (audience: string) => lastSnapshot(events, audience).challenges.find((c) => c.id === story.id)!.displayBanner;
-    expect(banner('main')).toBe("✍️ Ada's turn to write: open your phone");
+    expect(banner('main')!.map((p) => p.text).join('')).toBe("✍️ Ada's turn to write: open your phone");
+    expect(banner('main')![1]).toEqual({ text: 'Ada', color: expect.stringMatching(/^#[0-9a-f]{6}$/i) });
     expect(banner('host')).toBeUndefined();
     expect(banner(`player:${ada.id}`)).toBeUndefined();
     game.performHostAction({ action: 'close-challenge', instanceId: story.id });

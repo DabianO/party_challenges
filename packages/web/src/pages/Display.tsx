@@ -53,6 +53,8 @@ export function Display() {
   const showJoin = snapshot && snapshot.game.status !== 'LOBBY' && snapshot.game.status !== 'FINISHED';
   // Lines challenges put in the top bar (e.g. whose turn it is), while the game runs.
   const banners = snapshot?.game.status === 'IN_PROGRESS' && !snapshot.presentation ? snapshot.challenges.filter((c) => c.displayBanner) : [];
+  // Layers challenges draw over the whole screen (e.g. a balloon to shoot), while the game runs.
+  const overlays = snapshot?.game.status === 'IN_PROGRESS' && !snapshot.presentation && !fatal ? snapshot.challenges.filter((c) => c.displayOverlay) : [];
 
   return (
     <div className={`display${idle ? ' cursor-hidden' : ''}${(snapshot?.game.status === 'IN_PROGRESS' || snapshot?.presentation) && !fatal ? ' is-dashboard' : ''}`}>
@@ -63,7 +65,16 @@ export function Display() {
           {hostName && <span className="display-host muted">Hosted by {hostName}</span>}
           {banners.map((c) => (
             <span key={c.id} className="header-banner" role="status">
-              <span className="header-banner-title">{c.title}</span> {c.displayBanner}
+              <span className="header-banner-title">{c.title}</span>{' '}
+              {c.displayBanner!.map((part, i) =>
+                part.color ? (
+                  <span key={i} className="header-banner-color" style={{ color: part.color }}>
+                    {part.text}
+                  </span>
+                ) : (
+                  <span key={i}>{part.text}</span>
+                ),
+              )}
             </span>
           ))}
         </div>
@@ -100,6 +111,13 @@ export function Display() {
         )}
       </main>
 
+      {overlays.map((c) => (
+        <div key={c.id} className="display-overlay">
+          <div className="display-overlay-box">
+            <UIView node={c.displayOverlay} />
+          </div>
+        </div>
+      ))}
       {snapshot?.game.paused && (
         <div className="overlay" role="status">
           <div className="overlay-card">

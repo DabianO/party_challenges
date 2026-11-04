@@ -88,10 +88,10 @@ function Next({ ctx, entry, canContinue }: { ctx: PlayCtx; entry: BoardEntry; ca
   );
 }
 
-function BackBar({ ctx, title, children }: { ctx: PlayCtx; title: string; children?: React.ReactNode }) {
+function BackBar({ ctx, title, children, onBack }: { ctx: PlayCtx; title: string; children?: React.ReactNode; onBack?: () => void }) {
   return (
     <div className="challenge-top">
-      <button type="button" className="btn btn-ghost btn-sm" onClick={ctx.closeChallenge} aria-label="Back to challenges">
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onBack ?? ctx.closeChallenge} aria-label="Back to challenges">
         ← Back
       </button>
       <span className="challenge-top-title">{title}</span>
@@ -105,18 +105,31 @@ function Live({ ctx, entry }: { ctx: PlayCtx; entry: BoardEntry }) {
   const paused = ctx.snapshot.game.paused;
   const timer = lockTimer(entry, ctx.meId);
 
-  // One action: the answer is locked in with the submission itself (the screen then closes).
-  const onSubmit = async (payload: Record<string, unknown>) => {
-    const res = await ctx.sock.submit(entry.instanceId, payload, true);
+  // Usually one action: the answer is locked in with the submission itself (the screen then
+  // closes). A "Save" button (`final: false`) keeps the challenge open to come back to.
+  const onSubmit = async (payload: Record<string, unknown>, opts: { final: boolean }) => {
+    const res = await ctx.sock.submit(entry.instanceId, payload, opts.final);
     if (!res.ok) toast(res.reason ?? 'Not accepted', 'danger');
+    else if (!opts.final) toast('Saved ✓ Come back any time to add more', 'success');
   };
 
   // Live actions (e.g. pumping): fire and forget; the next snapshot shows the effect.
   const onAction = useCallback((payload: Record<string, unknown>) => void ctx.sock.action(entry.instanceId, payload), [ctx.sock, entry.instanceId]);
 
+  // The module locks the answer in when the player leaves (e.g. every pair linked).
+  const [leaving, setLeaving] = useState(false);
+  const leave = async () => {
+    if (!entry.lockOnLeave || paused) return ctx.closeChallenge();
+    setLeaving(true);
+    const res = await ctx.sock.submit(entry.instanceId, {}, true);
+    setLeaving(false);
+    if (!res.ok) toast(res.reason ?? 'Not accepted', 'danger');
+    ctx.closeChallenge();
+  };
+
   return (
     <section className="stack gap-md">
-      <BackBar ctx={ctx} title={entry.title}>
+      <BackBar ctx={ctx} title={entry.title} onBack={leaving ? () => undefined : () => void leave()}>
         {timer && <Countdown endsAt={timer.endsAt} startedAt={timer.startedAt} clockOffset={ctx.sock.clockOffset} paused={paused} size="sm" label="Time left" />}
       </BackBar>
       <UIView

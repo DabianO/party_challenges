@@ -2,6 +2,7 @@ import type {
   ActivityItem,
   AttemptStatus,
   Availability,
+  BannerPart,
   BoardEntry,
   Branding,
   ChallengeInstanceSummary,
@@ -837,7 +838,30 @@ export class GameRuntime {
         inst.moduleState = loaded.module.onAttemptLocked!(inst.moduleState, this.playerRef(player), this.ctxFor(inst));
       });
     }
-    const submission = this.submissionOf(attempt);
+    let submission = this.submissionOf(attempt);
+    // Answers given as live actions: the module turns them into the player's submission.
+    if (!submission && player && loaded.manifest.results === 'immediate' && loaded.module.lockInput) {
+      let payload: unknown = null;
+      const ref = this.playerRef(player);
+      const ctx = this.ctxFor(inst);
+      this.callModule(inst, () => {
+        payload = loaded.module.lockInput!(inst.moduleState, ref, ctx) ?? null;
+      });
+      if (payload !== null) {
+        submission = {
+          id: newId('s'),
+          challengeInstanceId: inst.id,
+          playerId: player.id,
+          attemptId: attempt.id,
+          payload: structuredClone(payload),
+          submittedAt: this.deps.clock(),
+          supersededBy: null,
+          evaluation: null,
+          scoredAt: null,
+        };
+        this.doc.submissions.push(submission);
+      }
+    }
     // An attempt the host's close ended without a submission did not "run out of time".
     if (player && (submission || !closing)) {
       const text = submission ? `${player.displayName} finished ${this.titleOf(inst)}` : `${player.displayName} ran out of time on ${this.titleOf(inst)}`;
@@ -1320,6 +1344,8 @@ export class GameRuntime {
         return this.reopenAllChallenges();
       case 'reset-challenge':
         return this.resetChallenge(action.instanceId);
+      case 'reset-all-challenges':
+        return this.resetAllChallenges();
       case 'reopen-for-player':
         return this.reopenForPlayer(action.instanceId, action.playerId);
       case 'assign-challenge':
@@ -1522,15 +1548,26 @@ export class GameRuntime {
 
   /** Wipe everything about an instance (points reversed) so it can be played again. */
   private resetChallenge(instanceId: string): HostActionResult {
-    const inst = this.getInstance(instanceId);
+    this.resetInstance(this.getInstance(instanceId));
+    this.commit();
+    return { ok: true };
+  }
+
+  /** Every challenge reset at once (players and the game itself stay). */
+  private resetAllChallenges(): HostActionResult {
+    for (const inst of this.doc.instances) this.resetInstance(inst);
+    this.commit();
+    const n = this.doc.instances.length;
+    return { ok: true, message: `${n} ${n === 1 ? 'challenge' : 'challenges'} reset` };
+  }
+
+  private resetInstance(inst: PersistedInstance): void {
     this.wipeInstance(inst);
     inst.openedAt = null;
     inst.closedAt = null;
     inst.phase = 'PENDING';
     if (this.doc.status === 'IN_PROGRESS' && inst.availability !== 'host-unlocked') this.openInstance(inst);
     this.queueEvent('LEADERBOARD_UPDATED', 'all', { instanceId: inst.id });
-    this.commit();
-    return { ok: true };
   }
 
   /** Cancel an instance's timers and judging, reverse its points, drop its attempts and state. */
@@ -2452,6 +2489,7 @@ export class GameRuntime {
       closedFor: includeConfig ? this.closedFor(inst) : undefined,
       displayPanel: withPanel ? this.displayPanelOf(inst) : undefined,
       displayBanner: withPanel ? this.displayBannerOf(inst) : undefined,
+      displayOverlay: withPanel ? this.displayOverlayOf(inst) : undefined,
     };
   }
 
@@ -2483,11 +2521,27 @@ export class GameRuntime {
   }
 
   /** The module's live big-screen panel (null when it has none or has not started). */
-  private displayBannerOf(inst: PersistedInstance): string | null {
+  private displayBannerOf(inst: PersistedInstance): BannerPart[] | null {
     const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
     if (!loaded?.module.displayBanner || inst.moduleState === null || inst.phase !== 'ACTIVE') return null;
-    const text = this.safeView(inst, () => loaded.module.displayBanner!(inst.moduleState, this.ctxFor(inst)));
-    return typeof text === 'string' && text.trim() ? text.trim().slice(0, 160) : null;
+    const line = this.safeView(inst, () => loaded.module.displayBanner!(inst.moduleState, this.ctxFor(inst)));
+    const parts = typeof line === 'string' ? [{ text: line }] : Array.isArray(line) ? line : [];
+    // At most 160 characters in all; colours only as #rrggbb.
+    let room = 160;
+    const out: BannerPart[] = [];
+    for (const part of parts) {
+      if (!part || typeof part.text !== 'string' || room <= 0) continue;
+      const text = part.text.slice(0, room);
+      room -= text.length;
+      out.push(typeof part.color === 'string' && /^#[0-9a-f]{6}$/i.test(part.color) ? { text, color: part.color } : { text });
+    }
+    return out.some((p) => p.text.trim()) ? out : null;
+  }
+
+  private displayOverlayOf(inst: PersistedInstance): UINode | null {
+    const loaded = this.deps.registry.get(inst.moduleId, inst.moduleVersion);
+    if (!loaded?.module.displayOverlay || inst.moduleState === null || inst.phase !== 'ACTIVE') return null;
+    return this.safeView(inst, () => loaded.module.displayOverlay!(inst.moduleState, this.ctxFor(inst))) ?? null;
   }
 
   private displayPanelOf(inst: PersistedInstance): UINode | null {
@@ -2535,17 +2589,24 @@ export class GameRuntime {
     let intro: UINode | null = null;
     let view: UINode | null = null;
     let canSubmit = false;
+    let lockOnLeave = false;
+    let timeLimit: number | null = null;
     let statusText: string | null = check ? (check.ok ? (check.hint ?? null) : check.reason) : null;
     let result: UINode | null = null;
 
     if (loaded && ctx && inst.moduleState !== null) {
       if (status === 'available') {
         intro = this.safeView(inst, () => loaded.module.introView?.(inst.moduleState, ref, ctx) ?? null) ?? null;
+      }
+      if ((status === 'available' || canReplay) && loaded.module.timeLimit) {
+        const seconds = this.safeView(inst, () => loaded.module.timeLimit!(inst.moduleState, ref, ctx));
+        timeLimit = typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : null;
       } else if (status === 'in_progress') {
         const vm = this.safeView(inst, () => loaded.module.guestView(inst.moduleState, ref, ctx));
         if (vm) {
           view = vm.ui;
           canSubmit = Boolean(vm.canSubmit) && !this.doc.paused;
+          lockOnLeave = vm.lockOnLeave === true && canSubmit;
           statusText = vm.status ?? null;
         }
       } else if (!reveal || status === 'waiting') {
@@ -2590,6 +2651,8 @@ export class GameRuntime {
         .filter((t) => t.playerId === null || t.playerId === player.id)
         .map((t): TimerInfo => ({ tag: t.tag, startedAt: t.startedAt, endsAt: t.endsAt, playerId: t.playerId ?? undefined })),
       canFinish: status === 'in_progress' && manifest?.resubmission === 'replace' && submission !== undefined,
+      lockOnLeave,
+      timeLimit,
     };
   }
 

@@ -77,7 +77,7 @@ Consequences for module code:
 | `evaluation.hostScoring` | Optional `{min,max,step}`; when set the host may enter points instead of approve/reject. The value arrives in `judgement.points`. |
 | `evaluation.deadlineSeconds` | Optional per-module override of the judge deadline. |
 | `results` | `immediate` — each submission is evaluated on its own as soon as the attempt locks (after judging). `onClose` — evaluation runs once over all submissions when the host closes the challenge (ranking, votes, predictions). `onClose` modules must be `automatic`. |
-| `resubmission` | `none` (default: submitting locks the attempt) or `replace` (a client may replace the answer until the timer fires or it sends FINISH). The web client always locks on the first submit (`final: true`), so design `guestView` around a single submit. |
+| `resubmission` | `none` (default: submitting locks the attempt) or `replace` (a client may replace the answer until the timer fires or it sends FINISH). The web client locks on a submit unless the button says `final: false` (`ui.submit('Save', { final: false })`): then the attempt stays open and every save replaces the last, until a final submit, the time limit or the host closing it (`fill-in-the-blanks`). Enter in a text box does what the screen's first button does. |
 | `attempts` | `once` (default; the host may still enable best-of replays) or `repeat`: taking part repeatedly *is* the challenge. Players may always start a new attempt, every attempt is scored and the points add up; gate who may start with `canStart`. `immediate` results only. Examples: `group-message`, `secret-word`, `report-score`. After a repeat attempt locks, a player who may start again straight away is offered to continue on the same screen. |
 | `suggestedCategory` | Optional, at most 40 characters: pre-filled as the challenge's category when the host adds it (e.g. `"Hot Takes"`). The host can change it. |
 | `suggestedReplay` | Optional `true`: replays start switched on when the host adds the challenge (best try counts; the host can switch them off). For challenges where playing again to beat your own score is the point (`color-match`). `immediate` results only. |
@@ -113,12 +113,14 @@ export default defineModule<Config, State, Input, Evaluation>({
   onAttemptStart(state, player, ctx) { ... },    // schedule the player's time limit here
   onTimer(state, tag, ctx, playerId) { ... },    // optional: your own timers
   onAttemptLocked(state, player, ctx) { ... },   // optional
+  lockInput(state, player, ctx) { ... },         // optional: live-action answers become the submission at the lock
   validateInput(state, player, input, ctx) { ... },
   handleInput(state, player, input, ctx) { ... },
   evaluate(state, submissions, ctx) { ... },
   calculateScores(state, evaluation, ctx) { ... },
   getStatistics(state, evaluations, ctx) { ... },
   introView(state, player, ctx) { ... },         // optional: instructions before Start
+  timeLimit(state, player, ctx) { ... },         // optional: seconds the player will have (warned before Start)
   guestView(state, player, ctx) { ... },
   presentSubmission(state, submission, ctx) { ... }, // optional: how judges see a submission
   mainView(state, ctx) { ... },                  // optional: public card content
@@ -145,6 +147,10 @@ evaluated → scored.
    nothing left to do (all words played, score reported): a repeat module's tile then shows
    as done instead of waiting. It is called for every player on every snapshot, so keep it
    pure and cheap.
+1b2. **`timeLimit(state, player, ctx)`** (optional) returns the seconds the player will have
+   once they start (the `lock` timer you set in `onAttemptStart`), or null. The phone then shows
+   a warning before Start ("Timed challenge: 60 seconds", with the `introView`), where the
+   player can still go back. Every module with a time limit setting implements it.
 1c. **`playerNote(state, player, ctx)`** (optional) returns a short personal line for the
    player's tile and lock-in message, e.g. `"312 ms · best 287 ms"`. It is shown even while
    the host keeps results hidden, so use it for practice feedback, not to give away answers.
@@ -188,6 +194,17 @@ evaluated → scored.
    Panels with a picture (a `blob-field`) come first on the screen, other panels underneath.
    **`displayBanner(state, ctx)`** (optional) returns one short line for the big screen's top
    bar while the instance is open, or null: `group-message` shows whose turn it is there.
+   Return parts, `[{ text }, { text: name, color: player.color }, …]`, to colour some of it
+   (`group-message`: the writer's name in their own colour).
+   **`displayOverlay(state, ctx)`** (optional) returns a layer drawn over the whole big screen
+   while the instance is open (a 16:9 box, see-through and not clickable, hidden during the
+   results presentation), or null. `ui.aimField(crosshair, home, targets, bursts)` draws a
+   crosshair that glides between positions, its home base, targets that float a little
+   (`{ id, x, y, size, color }`, positions 0..1) and a pop with a short text where one was hit
+   (a new burst `id` plays it once), plus an optional `shot` that flashes once per new `id`. Steer it with `ui.dPad(action, { fireLabel, disabled })`
+   on the phones: arrow presses arrive in batches as `{ [action]: { move: [dx, dy] } }`,
+   Shoot as `{ [action]: { fire: true } }`. Example: `balloon-pop` (an instance timer brings
+   each balloon; instance timers pause with the game).
 1g. **`spotlight(state, ctx)`** (optional) returns items for the big screen's spotlight:
    `{ id, ui, activity }[]`, e.g. one per statement with how the room answered it. The engine
    shows one item a minute from all open instances that have any: every item once per round,
@@ -201,6 +218,21 @@ evaluated → scored.
    every change as the live action `{ answer: { id, value } }`, with no submit, so players can
    change their minds until the instance closes. Pair it with `results: "onClose"` and score
    from state, like the Hot Takes modules.
+   **Answers built up item by item:** `ui.pairMatch(action, left, right, links, { leftTitle,
+   rightTitle })` shows two columns to link (tap one item, then one on the other side; tap a
+   link to undo it): every change is the live action `{ [action]: { left, right } }` (`right:
+   null` undoes). Use ids that do not tell what belongs together (positions on the player's
+   own sheet). Return `lockOnLeave: true` from `guestView` (with `canSubmit: true`) once the
+   answer is complete: going back to the board then submits `{}` (final), so `validateInput`
+   must accept it. Example: `match-up` (`onClose`, scored from state, so unfinished sheets
+   count too). `ui.wordEntry(action, { placeholder, maxLength, buttonLabel })` is a box for one
+   answer after another: Enter sends `{ [action]: text }`, empties the box and keeps the
+   keyboard open; show what came of each entry with your own nodes. For `immediate` modules
+   whose answers are live actions, implement **`lockInput(state, player, ctx)`**: when the
+   attempt locks without a submission (time up, Finish, the host closing it) the engine
+   records what it returns as the player's submission and evaluates it, or nothing for null
+   (the attempt is missed). Example: `name-them-all` (everything named before the buzzer
+   counts).
 1i. **`presentation(state, evaluations, ctx)`** (optional) returns slides for the results
    presentation the host runs on the big screen once the challenge is closed (`RESULTS`):
    `{ caption?, steps: UINode[], stepSeconds? }[]`. The host moves through the steps one by one

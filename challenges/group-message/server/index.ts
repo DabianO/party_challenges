@@ -15,7 +15,7 @@
  * Every contribution is its own attempt (`attempts: "repeat"`): the engine scores each one
  * and adds the points up; `canStart` tells the engine whose turn it is.
  */
-import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
+import { defineModule, ui, type BannerPart, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -186,6 +186,11 @@ export default defineModule<Config, State, Input, Evaluation>({
     return { ok: false, reason: 'Waiting for the next turn' };
   },
 
+  // What is left of the player's turn.
+  timeLimit(state, player, ctx) {
+    return state.turn?.playerId === player.id ? Math.max(1, Math.round((state.turn.endsAt - ctx.now()) / 1000)) : null;
+  },
+
   onAttemptStart(state, player, ctx) {
     // The attempt ends with the turn: the player gets whatever is left of it.
     const left = state.turn?.playerId === player.id ? (state.turn.endsAt - ctx.now()) / 1000 : 1;
@@ -260,11 +265,13 @@ export default defineModule<Config, State, Input, Evaluation>({
     };
   },
 
-  displayBanner(state, ctx) {
-    // Whose turn it is, in the big screen's top bar: players who put their phone away know when to pick it up.
+  displayBanner(state, ctx): BannerPart[] | null {
+    // Whose turn it is, in the big screen's top bar (the name in the player's own colour):
+    // players who put their phone away know when to pick it up.
     if (!(state.open ?? state.turn !== null) || !state.turn) return null;
-    const name = ctx.players().find((p) => p.id === state.turn!.playerId)?.displayName ?? state.turn.displayName;
-    return `✍️ ${name}'s turn to write: open your phone`;
+    const player = ctx.players().find((p) => p.id === state.turn!.playerId);
+    const name = player?.displayName ?? state.turn.displayName;
+    return [{ text: '✍️ ' }, { text: name, ...(player?.color ? { color: player.color } : {}) }, { text: "'s turn to write: open your phone" }];
   },
 
   presentation(state): PresentationSlide[] {
