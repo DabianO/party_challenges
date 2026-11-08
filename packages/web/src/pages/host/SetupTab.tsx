@@ -173,6 +173,19 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
                     )}
                   </div>
                   <div className="challenge-row-actions">
+                    <label className="checkbox-inline challenge-row-present" title="Show its results in the results presentation on the big screen">
+                      <input
+                        type="checkbox"
+                        checked={c.inPresentation}
+                        disabled={busy}
+                        aria-label={`Include ${c.title} in the results presentation`}
+                        onChange={(e) => {
+                          const inPresentation = e.target.checked;
+                          void run(() => api.updateChallenge(ctx.gameId, ctx.token, c.id, { inPresentation }));
+                        }}
+                      />{' '}
+                      🎞 <span className="challenge-row-present-label">In presentation</span>
+                    </label>
                     <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => openEdit(c)}>
                       Edit
                     </button>

@@ -52,11 +52,11 @@ export function BlobField({ node }: { node: BlobFieldNode }) {
     let acc = new Float32Array(2);
 
     const resize = () => {
-      const rect = wrap.getBoundingClientRect();
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      // Exactly the frame (a bigger canvas than its frame would be cut off on one side).
-      width = Math.max(40, Math.floor(rect.width));
-      height = Math.max(40, Math.floor(rect.height));
+      // Exactly the frame (a bigger canvas than its frame would be cut off on one side). Its
+      // layout size, not its size on screen: a slide shrunk to fit scales the canvas with it.
+      width = Math.max(40, Math.floor(wrap.clientWidth));
+      height = Math.max(40, Math.floor(wrap.clientHeight));
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;

@@ -57,7 +57,7 @@ function withBalloon(ctx: InstanceContext, config = {}): State {
 
 describe('balloon-pop', () => {
   it('has a consistent manifest: live, scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'balloon-pop', version: '1.0.0', apiVersion: '2', results: 'onClose', category: 'skill' });
+    expect(mod.manifest).toMatchObject({ id: 'balloon-pop', version: '1.1.0', apiVersion: '2', results: 'onClose', category: 'skill' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -130,7 +130,7 @@ describe('balloon-pop', () => {
     const spot = state.crosshair;
     expect(spot).not.toEqual({ x: 1, y: 8 });
     expect(state.popped).toEqual([{ balloonId: 'b1', playerId: 'p2', displayName: 'Bea', ms: 12_000 }]);
-    expect(scheduled.map((s) => [s.tag, s.seconds])).toEqual([
+    expect(scheduled.filter((s) => s.tag !== 'home').map((s) => [s.tag, s.seconds])).toEqual([
       ['balloon', 300],
       ['burst', 4],
     ]);
@@ -151,6 +151,26 @@ describe('balloon-pop', () => {
     state = mod.onTimer!(state, 'balloon', ctx);
     expect(state.balloon?.id).toBe('b2');
     expect(state.crosshair.y).toBeCloseTo(spot.y + 0.4); // a new balloon does not move it
+  });
+
+  it('sends the crosshair home when nobody moved it for a minute', () => {
+    const { ctx, scheduled } = fakeCtx([ada]);
+    let state = withBalloon(ctx);
+    scheduled.length = 0;
+    state = act(state, ctx, ada, { move: [5, -5] });
+    state = act(state, ctx, ada, { move: [1, 0] });
+    // Every move starts the minute again (the engine replaces a timer with the same tag).
+    expect(scheduled).toEqual([
+      { tag: 'home', seconds: 60, playerId: undefined },
+      { tag: 'home', seconds: 60, playerId: undefined },
+    ]);
+    expect(state.crosshair).not.toEqual({ x: 1, y: 8 });
+    // Shots do not count as moving it.
+    state = act(state, ctx, ada, { fire: true });
+    expect(scheduled).toHaveLength(2);
+    state = mod.onTimer!(state, 'home', ctx);
+    expect(state.crosshair).toEqual({ x: 1, y: 8 });
+    expect(state.balloon?.id).toBe('b1');
   });
 
   it('makes a player reload after a miss, so hammering Shoot does not win', () => {

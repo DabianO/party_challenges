@@ -127,10 +127,31 @@ export function Play({ code, session, onSessionInvalid }: PlayProps) {
   const challengeId = params.get('challenge');
   const readyId = params.get('ready');
   const judging = params.get('judge') === '1';
-  // A challenge (or the judging screen) opens at its top, not where the board was scrolled to.
+  // A challenge (or the judging screen) opens at its top, not where the board was scrolled to;
+  // back on the board, the player is where they left it.
+  const onBoard = !challengeId && !readyId && !judging;
+  const boardScroll = useRef(0);
+  // Set while rendering, so the scroll the browser makes as the board goes away is not remembered.
+  const boardShown = useRef(onBoard);
+  boardShown.current = onBoard;
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [challengeId, readyId, judging]);
+    const remember = () => {
+      if (boardShown.current) boardScroll.current = window.scrollY;
+    };
+    window.addEventListener('scroll', remember, { passive: true });
+    return () => window.removeEventListener('scroll', remember);
+  }, []);
+  useEffect(() => {
+    if (!onBoard) {
+      window.scrollTo(0, 0);
+      return undefined;
+    }
+    const y = boardScroll.current;
+    window.scrollTo(0, y);
+    // Once the board has laid out (images, fonts), once more.
+    const frame = requestAnimationFrame(() => window.scrollTo(0, y));
+    return () => cancelAnimationFrame(frame);
+  }, [onBoard, challengeId, readyId, judging]);
 
   const openChallenge = useCallback(
     (instanceId: string) => {

@@ -10,6 +10,7 @@ import { AttentionPanel, attentionCount } from './AttentionPanel';
 import { ChallengeControls, type Act } from './ChallengeControls';
 import { EvaluationsPanel } from './EvaluationsPanel';
 import type { HostCtx } from './hostApi';
+import { api } from '../../lib/api';
 import { PlayerList } from './PlayerList';
 import { StartOverButton } from './StartOverButton';
 import { relativeTime, useNow } from '../../lib/time';
@@ -126,7 +127,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
         </div>
         {running && <BigScreenPanel ctx={ctx} busy={busy} onUpdate={() => void act({ action: 'publish-standings' })} />}
         {running && ctx.snapshot.spotlightChoices.length > 0 && <SpotlightPanel ctx={ctx} busy={busy} act={act} />}
-        {(running || finished) && (ctx.snapshot.presentationDeck.length > 0 || ctx.snapshot.presentation) && <PresentationPanel ctx={ctx} busy={busy} act={act} />}
+        {(running || finished) && (ctx.snapshot.presentationDeck.length > 0 || ctx.snapshot.presentation || challenges.some((c) => c.phase === 'RESULTS')) && <PresentationPanel ctx={ctx} busy={busy} act={act} />}
         {(running || finished) && (
           <div className={`reveal-panel${game.resultsRevealed ? ' is-revealed' : ''}`}>
             <span className="grow stack gap-xs">
@@ -220,9 +221,16 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
  */
 function PresentationPanel({ ctx, busy, act }: { ctx: HostCtx; busy: boolean; act: Act }) {
   const { presentation, presentationDeck } = ctx.snapshot;
-  const [left, setLeft] = useState<string[]>([]);
   const [autoplay, setAutoplay] = useState(true);
-  const picked = presentationDeck.filter((d) => !left.includes(d.instanceId));
+  // Which challenges are in it is the setup's choice ("In presentation"); ticking here changes it there too.
+  const picked = presentationDeck.filter((d) => d.included);
+  // In the presentation according to the setup, but without slides (yet): say why, so none seems forgotten.
+  const inDeck = new Set(presentationDeck.map((d) => d.instanceId));
+  const waiting = ctx.snapshot.challenges.filter((c) => c.inPresentation && !inDeck.has(c.id));
+  const stillOpen = waiting.filter((c) => c.phase !== 'RESULTS');
+  const empty = waiting.filter((c) => c.phase === 'RESULTS');
+  const include = (instanceId: string, inPresentation: boolean) =>
+    void api.updateChallenge(ctx.gameId, ctx.token, instanceId, { inPresentation }).catch((e: unknown) => ctx.toast(e instanceof Error ? e.message : 'Could not change that', 'danger'));
   const slides = picked.reduce((n, d) => n + d.slides, 0);
   // Moving on should feel instant (and work while a previous move is still on its way).
   const go = (to: PresentationMove) => void ctx.act({ action: 'move-presentation', to });
@@ -257,14 +265,24 @@ function PresentationPanel({ ctx, busy, act }: { ctx: HostCtx; busy: boolean; ac
               <label key={d.instanceId} className="checkbox-inline">
                 <input
                   type="checkbox"
-                  checked={!left.includes(d.instanceId)}
+                  checked={d.included}
                   disabled={busy}
-                  onChange={(e) => setLeft((l) => (e.target.checked ? l.filter((id) => id !== d.instanceId) : [...l, d.instanceId]))}
+                  onChange={(e) => include(d.instanceId, e.target.checked)}
                 />{' '}
                 {d.title} <span className="muted">({d.slides})</span>
               </label>
             ))}
           </span>
+          {stillOpen.length > 0 && (
+            <span className="muted small">
+              Not closed yet, so not in it: {stillOpen.map((c) => c.title).join(', ')}.
+            </span>
+          )}
+          {empty.length > 0 && (
+            <span className="muted small">
+              Nothing to show (nobody played {empty.length === 1 ? 'it' : 'them'}): {empty.map((c) => c.title).join(', ')}.
+            </span>
+          )}
         </span>
         <div className="presentation-start">
           <label className="checkbox-inline">

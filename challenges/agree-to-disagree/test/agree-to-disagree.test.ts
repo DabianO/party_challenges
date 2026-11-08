@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InstanceContext, PlayerRef } from '@challenge/contract';
-import mod from '../server/index.ts';
+import mod, { columnsFor } from '../server/index.ts';
 
 function fakeCtx(players: PlayerRef[]) {
   const ctx: InstanceContext = {
@@ -39,7 +39,7 @@ function answer(state: State, ctx: InstanceContext, who: PlayerRef, id: string, 
 
 describe('agree-to-disagree', () => {
   it('has a consistent manifest: a Hot Take scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'agree-to-disagree', version: '1.1.1', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
+    expect(mod.manifest).toMatchObject({ id: 'agree-to-disagree', version: '1.2.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -48,8 +48,10 @@ describe('agree-to-disagree', () => {
     let state = mod.createInstance(config, ctx);
     state = answer(state, ctx, ada, 's0', 1);
     const view = mod.guestView(state, ada, ctx);
-    expect(view.canSubmit).toBe(false);
-    expect(view.status).toBe('1 of 2 answered · change them any time');
+    // Optional lock-in: the button stays, Back keeps the answers open.
+    expect(view.canSubmit).toBe(true);
+    expect(view.status).toBe('1 of 2 answered · change them any time, or lock them in');
+    expect(JSON.stringify(view.ui)).toContain('Done: lock in my answers');
     const json = JSON.stringify(view.ui);
     expect(json).toContain('Pineapple belongs on pizza');
     expect(json).toContain(
@@ -90,8 +92,9 @@ describe('agree-to-disagree', () => {
     // Activity counts new and changed answers; the same level again changes nothing.
     expect(answer(state, ctx, ada, 's0', 6)).toBe(state);
     expect(state.activity.s0).toBe(2);
-    // Nothing to submit: answering is live only.
-    expect(mod.validateInput(state, ada, {}, ctx)).toMatchObject({ ok: false });
+    // Submitting only locks the answers in, once there is at least one.
+    expect(mod.validateInput(state, ada, {}, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, { id: 'nobody', displayName: 'Nobody', connected: true }, {}, ctx)).toEqual({ ok: false, reason: 'Answer at least one first' });
   });
 
   it('puts every statement in the spotlight with a column per level, the average and the split', () => {
@@ -159,7 +162,9 @@ describe('agree-to-disagree', () => {
     expect(slides).toHaveLength(1);
     expect(slides[0]!.steps).toHaveLength(1);
     const grid = slides[0]!.steps[0]!;
-    expect(grid).toMatchObject({ type: 'grid', columns: config.statements.length });
+    expect(grid).toMatchObject({ type: 'grid', columns: columnsFor(config.statements.length) });
+    // Wide charts: never three cramped side by side for a handful of statements.
+    expect([1, 2, 3, 5, 8, 9, 16].map(columnsFor)).toEqual([1, 2, 2, 2, 2, 3, 4]);
     expect((grid as { children: unknown[] }).children).toHaveLength(config.statements.length);
     // The same picture as the spotlight: how the room answered, never who.
     state = answer(state, ctx, ada, 's0', 1);

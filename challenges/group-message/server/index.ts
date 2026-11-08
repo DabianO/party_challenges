@@ -74,8 +74,17 @@ const RETRY_SECONDS = 30;
 const MAX_WORD_LENGTH = 30;
 const MAX_TEXT_LENGTH = 120;
 
+/** Everything typed, split on spaces (punctuation on its own included). */
 function wordsOf(text: string | undefined): string[] {
   return (text ?? '').trim().split(/\s+/).filter(Boolean);
+}
+
+/** A real word has a letter, a digit or an emoji in it: a lone "." or "-" or "…" is free. */
+const WORDLIKE = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;
+
+/** How many words count towards a turn's limit (punctuation never does). */
+export function countWords(text: string | undefined): number {
+  return wordsOf(text).filter((w) => WORDLIKE.test(w)).length;
 }
 
 function messageOf(state: State): string {
@@ -205,7 +214,8 @@ export default defineModule<Config, State, Input, Evaluation>({
     const words = wordsOf(raw);
     const max = state.config.wordsPerTurn;
     if (words.length === 0) return { ok: false, reason: 'Type your words first' };
-    if (words.length > max) return { ok: false, reason: `Only ${plural(max, 'word')} per turn` };
+    // Punctuation is always allowed on top: only real words count.
+    if (countWords(raw) > max) return { ok: false, reason: `Only ${plural(max, 'word')} per turn (punctuation is free)` };
     if (words.some((w) => w.length > MAX_WORD_LENGTH)) return { ok: false, reason: 'That word is too long' };
     if (words.join(' ').length > MAX_TEXT_LENGTH) return { ok: false, reason: 'That is too long' };
     return { ok: true };
@@ -233,7 +243,7 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   getStatistics(state, evaluations) {
     return {
-      words: wordsOf(messageOf(state)).length,
+      words: countWords(messageOf(state)),
       contributions: evaluations.length,
       contributors: new Set(evaluations.map((e) => e.playerId)).size,
     };
@@ -255,7 +265,7 @@ export default defineModule<Config, State, Input, Evaluation>({
           ui.caption(c.prompt),
           shown,
           ui.timer('lock'),
-          ui.textInput('words', { label: `Add up to ${plural(c.wordsPerTurn, 'word')}`, maxLength: MAX_TEXT_LENGTH, placeholder: 'Your words…' }),
+          ui.textInput('words', { label: `Add up to ${plural(c.wordsPerTurn, 'word')} (punctuation is free)`, maxLength: MAX_TEXT_LENGTH, placeholder: 'Your words…' }),
           ui.submit('Add my words', { size: 'lg' }),
         ],
         { gap: 'md' },
@@ -296,7 +306,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     const message = messageOf(state);
     const writers = new Set(evaluations.map((e) => e.playerId)).size;
     const body = ui.card([ui.text(message || 'Nobody wrote anything yet.')], 'primary');
-    const facts = ui.row([ui.badge(plural(wordsOf(message).length, 'word')), ui.badge(plural(writers, 'writer'))], { gap: 'sm', wrap: true, justify: 'center' });
+    const facts = ui.row([ui.badge(plural(countWords(message), 'word')), ui.badge(plural(writers, 'writer'))], { gap: 'sm', wrap: true, justify: 'center' });
     return {
       ui: ui.stack([ui.title(state.config.prompt, { align: 'center' }), body, facts], { gap: 'md', align: 'stretch' }),
       guestUi: (player) => {

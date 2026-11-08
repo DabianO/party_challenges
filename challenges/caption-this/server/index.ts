@@ -3,8 +3,10 @@
  *
  * The player writes a caption for a picture. The engine assigns another player to judge
  * it against the criteria in the manifest; the module only maps the decision to points.
+ * Once closed, the host can show the picture with every caption on the big screen, six to a
+ * slide (`presentation`); rejected captions are left out without a word.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -36,6 +38,9 @@ interface Evaluation {
   note: string | null;
   decidedBy: 'peer' | 'host' | null;
 }
+
+/** Captions per presentation slide. */
+const PER_SLIDE = 6;
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
@@ -136,6 +141,27 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   mainView(state) {
     return ui.caption(state.config.prompt);
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    const shown = evaluations.filter((e) => e.approved && e.caption);
+    const slides: PresentationSlide[] = [];
+    for (let i = 0; i < shown.length; i += PER_SLIDE) {
+      const page = shown.slice(i, i + PER_SLIDE);
+      const cells = page.map((e) => ui.card([ui.subtitle(`“${e.caption}”`, { align: 'center' }), ui.caption(e.displayName, { align: 'center' })]));
+      slides.push({
+        caption: shown.length > PER_SLIDE ? `Captions ${i + 1}–${i + page.length} of ${shown.length}` : undefined,
+        steps: [
+          ui.stack([ui.image(ctx.mediaUrl(state.config.image), { maxHeight: '36vh', alt: 'The picture' }), ui.grid(Math.min(3, page.length), cells, { gap: 'md' })], {
+            gap: 'lg',
+            align: 'center',
+          }),
+        ],
+        // Time to read them all out loud.
+        stepSeconds: Math.max(10, page.length * 3),
+      });
+    }
+    return slides;
   },
 
   resultsView(state, evaluations, ctx) {

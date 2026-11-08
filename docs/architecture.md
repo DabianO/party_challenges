@@ -46,7 +46,10 @@ live panels and the spotlight share a grid of up to 2 × 2 (more rows of two bey
 **Results presentation.** Once challenges are closed, the host can present what everyone
 made on the big screen, as slides from the modules' `presentation` (fill-in-the-blanks
 entries rolling through their sentence, selfies next to their emoji, the group message, the
-Blob War picture, every Hot Take on one slide). It takes the whole screen in any game state,
+Blob War picture, every Hot Take on one slide, how the room answered a quiz question with the
+answer revealed in a second step; every module has slides). Each challenge's setup option
+`inPresentation` (default on, a checkbox on the Setup tab's list and in the Run tab's panel)
+says whether it is part of it. It takes the whole screen in any game state,
 also after the game is finished, and shows no points. The host steps through it (arrow keys,
 Page Up/Down) or lets it play: the runtime keeps the position in memory (`presentation.ts`
 moves through the running order) and times the steps; challenges that are reopened drop out.

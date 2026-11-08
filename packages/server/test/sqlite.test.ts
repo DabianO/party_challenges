@@ -25,6 +25,7 @@ function sampleGame(): PersistedGame {
     title: 'Guess the year',
     category: 'Intelligence',
     allowReplay: true,
+    inPresentation: false,
     configuration: { question: 'Q', correctAnswer: 1, timeLimit: 30 },
     moduleState: { nested: { array: [1, 2, 3], flag: true } },
     phase: 'ACTIVE',
@@ -143,7 +144,7 @@ describe('SqliteRepository migration', () => {
       ALTER TABLE challenge_instances DROP COLUMN category;
       ALTER TABLE challenge_instances DROP COLUMN allow_replay;
       ALTER TABLE submissions DROP COLUMN attempt_id;
-      PRAGMA user_version = 2;`);
+      ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 2;`);
     raw.close();
 
     const upgraded = new SqliteRepository(path);
@@ -173,7 +174,7 @@ describe('SqliteRepository migration', () => {
     repo.close();
     const raw = new DatabaseSync(path);
     raw.exec(`ALTER TABLE games DROP COLUMN standings; ALTER TABLE games DROP COLUMN standings_feed; ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar;
-      ALTER TABLE challenge_instances DROP COLUMN category; PRAGMA user_version = 3;`);
+      ALTER TABLE challenge_instances DROP COLUMN category; ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 3;`);
     raw.close();
 
     const upgraded = new SqliteRepository(path);
@@ -196,12 +197,33 @@ describe('SqliteRepository migration', () => {
     repo.saveGame(sampleGame());
     repo.close();
     const raw = new DatabaseSync(path);
-    raw.exec(`ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 6;`);
+    raw.exec(`ALTER TABLE players DROP COLUMN avatar; ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 6;`);
     raw.close();
     const upgraded = new SqliteRepository(path);
     const [game] = upgraded.loadGames();
     expect(game!.players[0]).toMatchObject({ displayName: 'Ada', avatar: null });
     expect(game!.spotlight.current).toMatchObject({ itemId: 's0' }); // v6 data kept
+    upgraded.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('upgrades a schema v7 database in place: every challenge in the presentation', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { DatabaseSync } = await import('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'challenge-migrate-v7-'));
+    const path = join(dir, 'platform.sqlite');
+    const repo = new SqliteRepository(path);
+    repo.saveGame(sampleGame());
+    repo.close();
+    const raw = new DatabaseSync(path);
+    raw.exec(`ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 7;`);
+    raw.close();
+    const upgraded = new SqliteRepository(path);
+    const [game] = upgraded.loadGames();
+    expect(game!.instances[0]).toMatchObject({ title: 'Guess the year', inPresentation: true });
+    expect(game!.players[0]).toMatchObject({ avatar: 'media://selfie1' }); // v7 data kept
     upgraded.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -217,7 +239,7 @@ describe('SqliteRepository migration', () => {
     repo.saveGame(sampleGame());
     repo.close();
     const raw = new DatabaseSync(path);
-    raw.exec(`ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 5;`);
+    raw.exec(`ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 5;`);
     raw.close();
 
     const upgraded = new SqliteRepository(path);
@@ -240,7 +262,7 @@ describe('SqliteRepository migration', () => {
     repo.saveGame(sampleGame());
     repo.close();
     const raw = new DatabaseSync(path);
-    raw.exec(`ALTER TABLE challenge_instances DROP COLUMN category; ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; PRAGMA user_version = 4;`);
+    raw.exec(`ALTER TABLE challenge_instances DROP COLUMN category; ALTER TABLE games DROP COLUMN spotlight; ALTER TABLE players DROP COLUMN avatar; ALTER TABLE challenge_instances DROP COLUMN in_presentation; PRAGMA user_version = 4;`);
     raw.close();
 
     const upgraded = new SqliteRepository(path);

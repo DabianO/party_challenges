@@ -14,7 +14,7 @@
  * No two players get the same word while the list lasts. Built-in words come with their Dutch
  * translation in brackets (`words.nl.json`).
  */
-import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 import wordsJson from '../words.json' with { type: 'json' };
@@ -150,7 +150,27 @@ function pickWord(state: State, ctx: InstanceContext): string {
   return mine ?? freshFrom(BUILT_IN, used, ctx) ?? freshFrom(custom, used, ctx) ?? BUILT_IN[Math.floor(ctx.rng() * BUILT_IN.length)]!;
 }
 
-const HOW_TO = 'Slip it into a conversation without the other person noticing.';
+/** Words on one presentation slide (more go on the next). */
+const WORDS_PER_SLIDE = 24;
+
+/** Columns for `n` words on one presentation slide, so they read well at 16:9. */
+function columnsFor(n: number): number {
+  return n <= 3 ? Math.max(1, n) : n <= 8 ? 4 : n <= 15 ? 5 : 6;
+}
+
+/** Every distinct word (case-insensitive) with how often it was answered, alphabetically. */
+function wordCounts(evaluations: Evaluation[]): { word: string; n: number }[] {
+  const byKey = new Map<string, { word: string; n: number }>();
+  for (const e of evaluations) {
+    const key = e.word.toLowerCase();
+    const row = byKey.get(key) ?? { word: e.word, n: 0 };
+    row.n++;
+    byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((a, b) => a.word.localeCompare(b.word));
+}
+
+const HOW_TO ='Slip it into a conversation without the other person noticing.';
 
 export default defineModule<Config, State, Input, Evaluation>({
   manifest: manifestJson as unknown as Manifest,
@@ -283,6 +303,47 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   mainView() {
     return ui.caption('Everyone has secret words to slip into their conversations. Listen carefully!');
+  },
+
+  presentation(_state, evaluations): PresentationSlide[] {
+    // How many words were played and how many slipped by, then the words that got past
+    // everyone (like the results, never the spotted ones or one still in someone's hand). No names.
+    if (evaluations.length === 0) return [];
+    const succeeded = evaluations.filter((e) => e.succeeded).length;
+    const spotted = evaluations.length - succeeded;
+    const players = new Set(evaluations.map((e) => e.playerId)).size;
+    const summary = (head: string, line: string, badges: UINode[]) =>
+      ui.stack([ui.display(head), ui.subtitle(line, { align: 'center' }), ui.row(badges, { gap: 'sm', justify: 'center', wrap: true })], { gap: 'md', align: 'center' });
+    const slides: PresentationSlide[] = [
+      {
+        caption: 'Secret words',
+        steps: [
+          summary(String(evaluations.length), `secret ${evaluations.length === 1 ? 'word' : 'words'} played`, [ui.badge(`by ${plural(players, 'player')}`)]),
+          summary(`${succeeded} of ${evaluations.length}`, 'slipped by unnoticed', [
+            ui.badge(`${succeeded} unnoticed`, succeeded ? 'success' : 'muted'),
+            ui.badge(`${spotted} spotted`, spotted ? 'warning' : 'muted'),
+          ]),
+        ],
+        stepSeconds: 8,
+      },
+    ];
+    const words = wordCounts(evaluations.filter((e) => e.succeeded));
+    const parts = Math.ceil(words.length / WORDS_PER_SLIDE);
+    for (let i = 0; i < parts; i++) {
+      const slice = words.slice(i * WORDS_PER_SLIDE, (i + 1) * WORDS_PER_SLIDE);
+      const cards = slice.map(({ word, n }) =>
+        ui.card(
+          [ui.subtitle(n > 1 ? `${word} ×${n}` : word, { align: 'center' }), ...(dutchOf(word) ? [ui.caption(`(${dutchOf(word)})`, { align: 'center' })] : [])],
+          'success',
+        ),
+      );
+      slides.push({
+        caption: parts > 1 ? `Slipped by unnoticed · ${i + 1} of ${parts}` : 'Slipped by unnoticed',
+        steps: [ui.grid(columnsFor(slice.length), cards, { gap: 'md' })],
+        stepSeconds: Math.min(30, 6 + slice.length),
+      });
+    }
+    return slides;
   },
 
   resultsView(state, evaluations) {

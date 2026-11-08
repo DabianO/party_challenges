@@ -32,7 +32,7 @@ const sub = (playerId: string, ms: number): Submission<{ clock: number }> => ({
 
 describe('time-estimation', () => {
   it('has a consistent manifest: automatic, immediate, one stop per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'time-estimation', version: '1.0.0', apiVersion: '2', category: 'skill', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'time-estimation', version: '1.1.0', apiVersion: '2', category: 'skill', results: 'immediate', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -63,5 +63,24 @@ describe('time-estimation', () => {
     const json = JSON.stringify(mod.resultsView(state, evaluations, ctx).ui);
     expect(json).toMatch(/"name":"Bea","value":"44.400 s · 0.6 s early".*"name":"Ada","value":"48.000 s · 3.0 s late"/);
     expect(json).toContain('Average 1.8 s off');
+  });
+
+  it('presents when the room stopped, then the target, without names or points', () => {
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const evaluations = [mod.evaluate(state, [sub('p1', 48_000)], ctx), mod.evaluate(state, [sub('p2', 44_400)], ctx)];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const [first, second] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(first).toContain('"distribution"');
+    expect(first).toContain('Earliest stop');
+    expect(first).not.toContain('"marker"');
+    expect(second).toContain('"marker"');
+    expect(second).toContain('1 early · 1 late · on average 1.8 s off');
+    for (const step of [first, second]) {
+      for (const p of players) expect(step).not.toContain(p.displayName);
+      expect(step).not.toMatch(/points|"ranking"|[Cc]losest/);
+    }
   });
 });

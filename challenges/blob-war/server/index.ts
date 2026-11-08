@@ -415,7 +415,8 @@ export default defineModule<Config, State, Action, Evaluation>({
     const top = [...field.blobs].sort((a, b) => b.share - a.share).filter((b) => b.share > 0).slice(0, 5);
     return [
       {
-        steps: [ui.stack([field, ui.caption(top.map((b) => `${b.label} ${pct(b.share)}`).join(' · '), { align: 'center' })], { gap: 'md', align: 'stretch' })],
+        // The field as big as the slide allows, the biggest shares in readable text under it.
+        steps: [ui.stack([field, ui.text(top.map((b) => `${b.label} ${pct(b.share)}`).join(' · '), { align: 'center' })], { gap: 'md', align: 'stretch' })],
         stepSeconds: 15,
       },
     ];

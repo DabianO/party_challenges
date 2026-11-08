@@ -36,7 +36,7 @@ const sub = (playerId: string, startedAt: number, serverMs: number, clock: numbe
 
 describe('stop-the-clock', () => {
   it('has a consistent manifest: automatic, immediate, one stop per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'stop-the-clock', version: '1.1.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'stop-the-clock', version: '1.2.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -139,5 +139,30 @@ describe('stop-the-clock', () => {
     expect(adaView).toContain('9 of 10 points');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('Nobody stopped the clock yet');
     expect(mod.getStatistics(state, evaluations, ctx)).toEqual({ stops: 3, early: 1, late: 2, averageOffMs: 977, closest: { name: 'Bea', offMs: -10 }, timedByServer: 0 });
+  });
+
+  it('presents when the room stopped the clock, then the target, without names or points', () => {
+    const { ctx } = fakeCtx([ada, bea, cyd]);
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const evaluations = [
+      mod.evaluate(state, [sub('p1', 0, 35_420, 35_420)], ctx),
+      mod.evaluate(state, [sub('p2', 0, 34_990, 34_990)], ctx),
+      mod.evaluate(state, [sub('p3', 0, 37_500, 37_500)], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const [first, second] = slides[0]!.steps.map((step) => JSON.stringify(step));
+    expect(first).toContain('"distribution"');
+    expect(first).toContain('34.990 s');
+    expect(first).toContain('37.500 s');
+    expect(first).not.toContain('"marker"');
+    expect(second).toContain('"marker"');
+    expect(second).toContain('1 early · 2 late · on average 977 ms off');
+    for (const step of [first, second]) {
+      for (const p of [ada, bea, cyd]) expect(step).not.toContain(p.displayName);
+      expect(step).not.toMatch(/points|"ranking"|[Cc]losest/);
+    }
   });
 });

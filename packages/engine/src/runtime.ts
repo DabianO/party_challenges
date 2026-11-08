@@ -174,6 +174,7 @@ export class GameRuntime {
       inst.title ??= '';
       inst.category ??= '';
       inst.allowReplay ??= false;
+      inst.inPresentation ??= true;
       // A pinned version that is no longer installed moves up to a compatible minor (same major).
       if (!deps.registry.get(inst.moduleId, inst.moduleVersion)) {
         const compatible = deps.registry.compatible(inst.moduleId, inst.moduleVersion);
@@ -388,6 +389,7 @@ export class GameRuntime {
       title: '',
       category: '',
       allowReplay: loaded.manifest.suggestedReplay === true && loaded.manifest.results === 'immediate',
+      inPresentation: true,
       configuration: validated.value,
       moduleState: null,
       phase: 'PENDING',
@@ -411,7 +413,9 @@ export class GameRuntime {
   }
 
   updateChallenge(instanceId: string, configuration: unknown | undefined, options: Partial<InstanceOptions> = {}): PersistedInstance {
-    this.assertNotFinished();
+    // What goes into the results presentation can still change once the game is over.
+    const presentationOnly = configuration === undefined && Object.keys(options).every((k) => k === 'inPresentation');
+    if (!presentationOnly) this.assertNotFinished();
     const inst = this.getInstance(instanceId);
     const loaded = this.moduleFor(inst);
     if (configuration !== undefined) {
@@ -472,6 +476,10 @@ export class GameRuntime {
       }
       inst.allowReplay = options.allowReplay;
     }
+    if (options.inPresentation !== undefined) {
+      if (typeof options.inPresentation !== 'boolean') throw validationError('inPresentation must be true or false');
+      inst.inPresentation = options.inPresentation;
+    }
     if (options.availability !== undefined) {
       if (!['open', 'host-unlocked', 'assigned'].includes(options.availability)) throw validationError('Invalid availability');
       inst.availability = options.availability;
@@ -509,6 +517,7 @@ export class GameRuntime {
         availability: inst.availability,
         evaluationMode: inst.evaluationMode,
         allowReplay: inst.allowReplay,
+        inPresentation: inst.inPresentation,
       })),
       media: {},
     };
@@ -2279,7 +2288,8 @@ export class GameRuntime {
 
   private startPresentation(instanceIds: string[] | undefined, autoplay: boolean): HostActionResult {
     const presentable = this.doc.instances.filter((i) => this.slidesOf(i).length > 0).map((i) => i.id);
-    let ids = presentable;
+    // By default, what the setup includes (each challenge's "In the results presentation").
+    let ids = presentable.filter((id) => this.doc.instances.find((i) => i.id === id)!.inPresentation);
     if (instanceIds !== undefined) {
       if (!Array.isArray(instanceIds) || instanceIds.some((id) => typeof id !== 'string')) throw validationError('instanceIds must be a list of challenge ids');
       for (const id of instanceIds) {
@@ -2289,7 +2299,7 @@ export class GameRuntime {
       ids = presentable.filter((id) => instanceIds.includes(id));
     }
     const { deck } = this.deckOf(ids);
-    if (deck.length === 0) throw invalidState('No closed challenge has anything to present yet');
+    if (deck.length === 0) throw invalidState(instanceIds === undefined && presentable.length > 0 ? 'Every closed challenge is left out of the presentation' : 'No closed challenge has anything to present yet');
     const first = deck[0]!;
     this.presentation = { instanceIds: ids, at: { instanceId: first.instanceId, slide: first.slide, step: 0, index: 0 }, autoplay, startedAt: 0, endsAt: null };
     this.showPresentationStep(deck);
@@ -2394,13 +2404,16 @@ export class GameRuntime {
     };
   }
 
-  /** Host only: every closed challenge with slides, and which ones the running presentation shows. */
+  /**
+   * Host only: every closed challenge with slides, and which ones the running presentation
+   * shows (or, while none runs, which ones the setup includes).
+   */
   private presentationDeck(): PresentationDeckEntry[] {
     const out: PresentationDeckEntry[] = [];
     for (const inst of this.doc.instances) {
       const slides = this.slidesOf(inst).length;
       if (slides === 0) continue;
-      out.push({ instanceId: inst.id, title: this.titleOf(inst), category: inst.category, slides, included: this.presentation?.instanceIds.includes(inst.id) ?? false });
+      out.push({ instanceId: inst.id, title: this.titleOf(inst), category: inst.category, slides, included: this.presentation ? this.presentation.instanceIds.includes(inst.id) : inst.inPresentation });
     }
     return out;
   }
@@ -2481,6 +2494,7 @@ export class GameRuntime {
       phase: inst.phase,
       availability: inst.availability,
       allowReplay: inst.allowReplay,
+      inPresentation: inst.inPresentation,
       assignedPlayerIds: includeConfig || inst.availability === 'assigned' ? inst.assignedPlayerIds : undefined,
       stats: this.stats(inst, showPoints),
       configuration: includeConfig ? inst.configuration : undefined,

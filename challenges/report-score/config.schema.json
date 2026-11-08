@@ -17,6 +17,12 @@
       "minimum": 0,
       "maximum": 1000,
       "default": 5
+    },
+    "allowImprove": {
+      "type": "boolean",
+      "title": "Players may improve their score",
+      "description": "They can fill in a better number later (e.g. after another round); only their best counts.",
+      "default": false
     }
   }
 }

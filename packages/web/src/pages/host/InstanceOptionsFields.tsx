@@ -4,7 +4,7 @@ import { availabilityHelp, availabilityLabel, evaluationHelp, evaluationLabel } 
 const AVAILABILITIES: Availability[] = ['open', 'host-unlocked', 'assigned'];
 const ALL_MODES: EvaluationMode[] = ['automatic', 'peer', 'host', 'hybrid'];
 
-export const DEFAULT_OPTIONS: InstanceOptions = { title: '', category: '', availability: 'open', assignedPlayerIds: [], evaluationMode: null, allowReplay: false };
+export const DEFAULT_OPTIONS: InstanceOptions = { title: '', category: '', availability: 'open', assignedPlayerIds: [], evaluationMode: null, allowReplay: false, inPresentation: true };
 
 export const TITLE_MAX = 80;
 export const CATEGORY_MAX = 40;
@@ -15,6 +15,7 @@ export function optionsOf(
         customTitle?: string;
         category?: string;
         allowReplay?: boolean;
+        inPresentation?: boolean;
         availability: Availability;
         assignedPlayerIds?: string[];
         evaluationMode?: EvaluationMode | null;
@@ -28,6 +29,7 @@ export function optionsOf(
     title: inst.customTitle ?? '',
     category: inst.category ?? '',
     allowReplay: inst.allowReplay ?? false,
+    inPresentation: inst.inPresentation ?? true,
     availability: inst.availability,
     assignedPlayerIds: inst.assignedPlayerIds ?? [],
     // Host snapshots carry the explicit override; fall back to inferring it from the effective mode.
@@ -155,6 +157,25 @@ export function InstanceOptionsFields({ value, onChange, players, module, disabl
         ) : (
           <p className="field-help">This challenge scores everyone together when you close it, so each player plays it once.</p>
         )}
+      </div>
+
+      <div className="form-field">
+        <label className="toggle">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={value.inPresentation}
+            disabled={disabled}
+            onChange={(e) => onChange({ ...value, inPresentation: e.target.checked })}
+          />
+          <span className="toggle-track" aria-hidden="true">
+            <span className="toggle-thumb" />
+          </span>
+          <span className="toggle-label">
+            In the results presentation <span className="muted">({value.inPresentation ? 'on' : 'off'})</span>
+          </span>
+        </label>
+        <p className="field-help">Once it is closed, its results get a slide on the big screen when you present (no points on slides).</p>
       </div>
 
       <div className="form-field">

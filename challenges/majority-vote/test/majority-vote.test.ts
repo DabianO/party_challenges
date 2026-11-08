@@ -53,7 +53,7 @@ const vote = (playerId: string, answer: unknown, submittedAt = T0 + 1000): Submi
 describe('majority-vote', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('majority-vote');
-    expect(mod.manifest.version).toBe('2.1.0');
+    expect(mod.manifest.version).toBe('2.2.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.category).toBe('social');
     expect(mod.manifest.results).toBe('onClose');
@@ -244,5 +244,31 @@ describe('majority-vote', () => {
     expect(alice).toContain('Not with the majority');
     expect(alice).toContain('You voted A. Yes');
     expect(JSON.stringify(results.guestUi!(players[4]!))).toContain('did not vote');
+  });
+
+  it('presents the vote, then reveals the winning side, without names or points', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    expect(mod.presentation!(state, [mod.evaluate(state, [], ctx)], ctx)).toEqual([]);
+    const evaluation = mod.evaluate(state, [vote('p1', 'A'), vote('p2', 'B'), vote('p3', 'B')], ctx);
+    const slides = mod.presentation!(state, [evaluation], ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const [ask, reveal] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(ask).toContain('Pineapple on pizza?');
+    expect(ask).toContain('"label":"B. No","value":2,"highlight":false');
+    expect(ask).not.toContain('"highlight":true');
+    expect(ask).not.toContain('Majority');
+    expect(reveal).toContain('"label":"B. No","value":2,"highlight":true');
+    expect(reveal).toContain('Majority: No');
+    expect(reveal).toContain('3 votes');
+    const all = JSON.stringify(slides);
+    for (const p of players) expect(all).not.toContain(p.displayName);
+    expect(all).not.toMatch(/point|scored/i);
+    // A unanimous vote says so on the reveal.
+    const unanimous = mod.presentation!(state, [mod.evaluate(state, [vote('p1', 'C'), vote('p2', 'C')], ctx)], ctx);
+    expect(JSON.stringify(unanimous[0]!.steps[1])).toContain('Unanimous!');
+    expect(JSON.stringify(unanimous[0]!.steps[0])).not.toContain('Unanimous!');
   });
 });

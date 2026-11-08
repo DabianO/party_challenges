@@ -41,7 +41,7 @@ function enter(state: ReturnType<typeof mod.createInstance>, player: PlayerRef, 
 
 describe('report-score', () => {
   it('has a consistent manifest', () => {
-    expect(mod.manifest).toMatchObject({ id: 'report-score', version: '1.0.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'report-score', version: '1.2.0', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -52,6 +52,38 @@ describe('report-score', () => {
     expect(mod.playerNote!(state, players[0]!, ctx)).toEqual({ text: 'Your score: 12', tone: 'success' });
     // The maximum itself is fine.
     expect(enter(mod.createInstance(config, ctx), players[0]!, 20).scores[0]!.points).toBe(20);
+  });
+
+  it('lets players improve their score when the host allows it: their total is their best', () => {
+    let state = mod.createInstance({ ...config, allowImprove: true }, ctx);
+    const ada = players[0]!;
+    let r = enter(state, ada, 8);
+    expect(r.scores).toEqual([{ playerId: 'p1', points: 8, reason: 'Reported score' }]);
+    state = r.state;
+    expect(mod.canStart!(state, ada, ctx)).toEqual({ ok: true, hint: 'Your score: 8 · improve it any time' });
+    expect(JSON.stringify(mod.guestView(state, ada, ctx).ui)).toContain('Your score now: 8');
+    // Better: only the difference, so the points add up to the best.
+    r = enter(state, ada, 12);
+    expect(r.scores).toEqual([{ playerId: 'p1', points: 4, reason: 'Improved from 8 to 12' }]);
+    state = r.state;
+    // Worse: nothing, and the best still counts.
+    r = enter(state, ada, 5);
+    expect(r.scores).toEqual([{ playerId: 'p1', points: 0, reason: '5 does not beat 12' }]);
+    state = r.state;
+    expect(mod.playerNote!(state, ada, ctx)).toEqual({ text: '5 does not beat your best: 12 still counts', tone: 'warning' });
+    const evaluations = [enter(mod.createInstance({ ...config, allowImprove: true }, ctx), ada, 8).evaluation, { ...r.evaluation, value: 12, points: 4, previousBest: 8 }, r.evaluation];
+    expect(mod.getStatistics(state, evaluations, ctx)).toMatchObject({ reported: 1, highest: 12, average: 12 });
+    expect(JSON.stringify(mod.presentation!(state, evaluations, ctx))).toContain('Reported: 12');
+    // Over the maximum: the penalty, closed for them, and their best stays.
+    r = enter(state, ada, 25);
+    expect(r.scores).toEqual([{ playerId: 'p1', points: -5, reason: '25 is above the maximum of 20' }]);
+    state = r.state;
+    expect(mod.canStart!(state, ada, ctx)).toMatchObject({ ok: false, finished: true, reason: 'Your score: 12 · closed for you' });
+    expect(mod.closedFor!(state, ctx)).toEqual(['p1']);
+    expect((mod.playerNote!(state, ada, ctx) as { text: string }).text).toContain('Your best score of 12 still counts.');
+    // At the maximum there is nothing left to improve.
+    const top = enter(mod.createInstance({ ...config, allowImprove: true }, ctx), ada, 20).state;
+    expect(mod.canStart!(top, ada, ctx)).toMatchObject({ ok: false, finished: true });
   });
 
   it('never mentions the penalty up front', () => {
@@ -114,5 +146,34 @@ describe('report-score', () => {
     const shared = JSON.stringify(mod.resultsView(state, evaluations, ctx).ui);
     expect(shared).toMatch(/"name":"Bea","value":"12","points":12.*"name":"Ada","value":"15 · −5","points":10/);
     expect(JSON.stringify(mod.resultsView(state, evaluations, ctx).guestUi!(players[0]!))).toContain('−5 for going over the maximum');
+  });
+});
+
+describe('report-score presentation', () => {
+  it('shows the task, how many reported and the spread, without names, points or penalties', () => {
+    const state = mod.createInstance(config, ctx);
+    const evaluations = [
+      mod.evaluate(state, [sub('p1', 25)], ctx), // over the maximum: not mentioned
+      mod.evaluate(state, [sub('p1', 15)], ctx),
+      mod.evaluate(state, [sub('p2', 12)], ctx),
+      mod.evaluate(state, [sub('p3', 4)], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const shown = JSON.stringify(slides);
+    expect(shown).toContain(config.prompt);
+    expect(shown).toContain('"text":"3"');
+    expect(shown).toContain('players reported a score');
+    expect(shown).toContain('Lowest 4');
+    expect(shown).toContain('Average 10.3');
+    expect(shown).toContain('Highest 15');
+    expect(shown).not.toMatch(/Ada|Bea|25|maximum|"ranking"|"points"|−/);
+  });
+
+  it('has nothing to show until someone reported a valid score', () => {
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    expect(mod.presentation!(state, [mod.evaluate(state, [sub('p1', 99)], ctx)], ctx)).toEqual([]);
+    expect(JSON.stringify(mod.presentation!(state, [mod.evaluate(state, [sub('p1', 7)], ctx)], ctx))).toContain('Reported: 7');
   });
 });

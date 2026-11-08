@@ -1,7 +1,7 @@
 {
   "id": "open-performance",
   "name": "Open Performance",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "apiVersion": "2",
   "category": "chaos",
   "description": "Players perform an open-ended task live (a pitch, a joke, a dance) and hand in a short entry; the host (or a peer) judges it.",

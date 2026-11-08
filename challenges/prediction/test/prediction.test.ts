@@ -52,7 +52,7 @@ const predict = (playerId: string, answer: unknown, submittedAt = T0 + 1000): Su
 describe('prediction', () => {
   it('has a consistent v2 manifest with host resolution hooks', () => {
     expect(mod.manifest.id).toBe('prediction');
-    expect(mod.manifest.version).toBe('2.1.0');
+    expect(mod.manifest.version).toBe('2.2.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.results).toBe('onClose');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
@@ -221,5 +221,39 @@ describe('prediction', () => {
     expect(JSON.stringify(results.guestUi!(players[1]!))).toContain('You called it! +10 points');
     expect(JSON.stringify(results.guestUi!(players[0]!))).toContain('You predicted Red team');
     expect(JSON.stringify(results.guestUi!(players[2]!))).toContain('You did not predict');
+  });
+
+  it('presents the predictions, then reveals what happened, without names or points', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    expect(mod.presentation!(state, [mod.evaluate(state, [], ctx)], ctx)).toEqual([]);
+    const unresolved = mod.evaluate(state, [predict('p1', 'o0'), predict('p2', 'o1'), predict('p3', 'o0')], ctx);
+    expect(mod.presentation!(state, [unresolved], ctx)[0]!.steps).toHaveLength(1);
+    const resolved = mod.applyHostResolution!(state, unresolved, { outcome: 'o1' }, ctx).evaluation;
+    const slides = mod.presentation!(state, [resolved], ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const [ask, reveal] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(ask).toContain('Who will win the next challenge?');
+    expect(ask).toContain('"label":"Blue team","value":1,"highlight":false');
+    expect(ask).not.toContain('"highlight":true');
+    expect(ask).toContain('3 predictions');
+    expect(reveal).toContain('"label":"Blue team","value":1,"highlight":true');
+    expect(reveal).toContain('1 of 3 called it');
+    const all = JSON.stringify(slides);
+    for (const p of players) expect(all).not.toContain(p.displayName);
+    expect(all).not.toMatch(/point/i);
+  });
+
+  it('presents player options, leaving out unpredicted ones when there are many', () => {
+    const roster: PlayerRef[] = Array.from({ length: 10 }, (_, i) => ({ id: `q${i}`, displayName: `Player ${i}`, connected: true }));
+    const { ctx } = fakeCtx([0.5], roster);
+    const state = mod.createInstance({ ...config, optionsSource: 'players' as const }, ctx);
+    const evaluation = mod.evaluate(state, [predict('q0', 'q1'), predict('q2', 'q1'), predict('q3', 'q4')], ctx);
+    const resolved = mod.applyHostResolution!(state, evaluation, { outcome: 'q9' }, ctx).evaluation;
+    const reveal = mod.presentation!(state, [resolved], ctx)[0]!.steps[1] as unknown as { children: { type: string; bars?: { label: string }[] }[] };
+    expect(reveal.children.find((n) => n.type === 'bar-chart')!.bars!.map((b) => b.label)).toEqual(['Player 1', 'Player 4', 'Player 9']);
+    expect(JSON.stringify(reveal)).toContain('Nobody saw that coming!');
   });
 });

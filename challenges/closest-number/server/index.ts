@@ -5,7 +5,7 @@
  * submits an estimate. When the host closes the challenge, all guesses are ranked by
  * distance and scored together.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type Tone, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -44,6 +44,84 @@ function fmt(n: number, unit?: string): string {
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
+}
+
+/** Presentation histogram: one column per whole number when there are few, otherwise equal ranges. */
+const MAX_COLUMNS = 12;
+const RANGES = 10;
+
+interface Spread {
+  columns: { label: string; count: number }[];
+  /** Column a value falls in. */
+  indexOf: (v: number) => number;
+  /** Where a value lies along the axis, 0..1 (for the distribution's marker). */
+  at: (v: number) => number;
+  /** Ranges: the axis carries the numbers (compact histogram). */
+  axis?: { start: string; end: string };
+}
+
+/** 1, 2, 2.5 or 5 times a power of ten, at least `raw`. */
+function niceStep(raw: number): number {
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+/**
+ * How `values` spread, on an axis that also spans `extra` (e.g. the answer, once revealed).
+ * Far-off values (beyond 1.5 × the interquartile range) land in the end columns, marked ≤ / ≥,
+ * so one wild guess does not squash everyone else into a single column.
+ */
+function spreadOf(values: number[], extra: number[], label: (n: number) => string): Spread {
+  const sorted = [...values].sort((a, b) => a - b);
+  const min = sorted[0]!;
+  const max = sorted[sorted.length - 1]!;
+  let lo = min;
+  let hi = max;
+  if (sorted.length >= 4) {
+    const q1 = sorted[Math.floor((sorted.length - 1) * 0.25)]!;
+    const q3 = sorted[Math.ceil((sorted.length - 1) * 0.75)]!;
+    const fence = 1.5 * (q3 - q1);
+    if (q3 > q1) {
+      lo = sorted.find((v) => v >= q1 - fence)!;
+      hi = [...sorted].reverse().find((v) => v <= q3 + fence)!;
+    }
+  }
+  lo = Math.min(lo, ...extra);
+  hi = Math.max(hi, ...extra);
+  const cutLow = min < lo;
+  const cutHigh = max > hi;
+  if (!(hi > lo)) return { columns: [{ label: label(lo), count: values.length }], indexOf: () => 0, at: () => 0.5 };
+  if ([...sorted, ...extra].every(Number.isInteger) && hi - lo < MAX_COLUMNS) {
+    const n = hi - lo + 1;
+    const indexOf = (v: number) => Math.min(n - 1, Math.max(0, Math.round(v - lo)));
+    const columns = Array.from({ length: n }, (_, i) => ({ label: label(lo + i), count: 0 }));
+    if (cutLow) columns[0]!.label = `≤ ${label(lo)}`;
+    if (cutHigh) columns[n - 1]!.label = `≥ ${label(hi)}`;
+    for (const v of values) columns[indexOf(v)]!.count++;
+    return { columns, indexOf, at: (v) => (v - lo + 0.5) / n };
+  }
+  const width = niceStep((hi - lo) / RANGES);
+  const start = Math.floor(lo / width) * width;
+  const n = Math.max(1, Math.ceil((hi - start) / width - 1e-9));
+  const end = start + n * width;
+  const indexOf = (v: number) => Math.min(n - 1, Math.max(0, Math.floor((v - start) / width + 1e-9)));
+  const columns = Array.from({ length: n }, (_, i) => ({ label: `${label(start + i * width)}–${label(start + (i + 1) * width)}`, count: 0 }));
+  if (cutLow) columns[0]!.label = `≤ ${label(start + width)}`;
+  if (cutHigh) columns[n - 1]!.label = `≥ ${label(end - width)}`;
+  for (const v of values) columns[indexOf(v)]!.count++;
+  return { columns, indexOf, at: (v) => (v - start) / (n * width), axis: { start: `${cutLow ? '≤ ' : ''}${label(start)}`, end: `${cutHigh ? '≥ ' : ''}${label(end)}` } };
+}
+
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** A small labelled number on a presentation slide. */
+function stat(label: string, value: string, tone: Tone = 'neutral'): UINode {
+  return ui.card([ui.caption(label, { align: 'center' }), ui.title(value, { align: 'center', tone: tone === 'neutral' ? undefined : tone })], tone);
 }
 
 export default defineModule<Config, State, Input, Evaluation>({
@@ -163,6 +241,49 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   mainView(state) {
     return ui.caption(state.config.question);
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    // Step 1: the question and the room's spread of guesses; step 2: the same, with the real
+    // value in it. No names, points or ranks: only the room as a whole.
+    const c = state.config;
+    const evaluation = evaluations[0];
+    const guesses = (evaluation?.ranked ?? []).map((r) => r.guess).filter(Number.isFinite);
+    if (!evaluation || guesses.length === 0) return [];
+    const answer = evaluation.correct;
+    const sorted = [...guesses].sort((a, b) => a - b);
+    const avg = guesses.reduce((a, b) => a + b, 0) / guesses.length;
+    // One decimal is plenty for the room's average on the big screen.
+    const tenth = (n: number) => Math.round(n * 10) / 10;
+    const summary = `${guesses.length} ${guesses.length === 1 ? 'guess' : 'guesses'} · average ${fmt(tenth(avg), c.unit)}`;
+    const step = (reveal: boolean): UINode => {
+      const spread = spreadOf(guesses, reveal ? [answer] : [], (n) => fmt(n));
+      return ui.stack(
+        [
+          ui.title(c.unit ? `${c.question} (${c.unit})` : c.question, { align: 'center' }),
+          ...(c.media ? [ui.image(ctx.mediaUrl(c.media), { maxHeight: '28vh' })] : []),
+          ui.distribution(spread.columns, {
+            axis: spread.axis,
+            compact: spread.axis ? true : undefined,
+            marker: reveal ? { at: spread.at(answer), label: `answer ${fmt(answer, c.unit)}` } : undefined,
+            highlight: reveal ? spread.indexOf(answer) : undefined,
+          }),
+          ui.grid(
+            4,
+            [
+              stat('Lowest guess', fmt(sorted[0]!, c.unit)),
+              stat('Middle guess', fmt(medianOf(guesses), c.unit)),
+              stat('Highest guess', fmt(sorted[sorted.length - 1]!, c.unit)),
+              reveal ? stat('The answer', fmt(answer, c.unit), 'success') : stat('The answer', '?', 'muted'),
+            ],
+            { gap: 'md' },
+          ),
+          ui.caption(reveal ? `${summary} · the room's average was ${fmt(tenth(Math.abs(avg - answer)), c.unit)} off` : summary, { align: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      );
+    };
+    return [{ steps: [step(false), step(true)], stepSeconds: 10 }];
   },
 
   resultsView(state, evaluations) {

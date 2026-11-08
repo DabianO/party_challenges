@@ -208,6 +208,7 @@ function pickOptions(body: Record<string, unknown>): Partial<InstanceOptions> {
   if ('title' in body) out.title = body.title as string;
   if ('category' in body) out.category = body.category as string;
   if ('allowReplay' in body) out.allowReplay = body.allowReplay as boolean;
+  if ('inPresentation' in body) out.inPresentation = body.inPresentation as boolean;
   if ('availability' in body) out.availability = body.availability as InstanceOptions['availability'];
   if ('assignedPlayerIds' in body) out.assignedPlayerIds = body.assignedPlayerIds as string[];
   if ('evaluationMode' in body) out.evaluationMode = body.evaluationMode as InstanceOptions['evaluationMode'];

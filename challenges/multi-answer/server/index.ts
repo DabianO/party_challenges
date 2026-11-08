@@ -11,7 +11,7 @@
  * tolerance, and get a number box with the answer's unit (this covers Numeric Answer). With
  * `anyOrder` the boxes are interchangeable (e.g. "name the three primary colours").
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -140,6 +140,35 @@ export function answerText(spec: AnswerSpec): string {
   return `${withUnit(spec.answer, spec.unit)}${tolerance > 0 && isNumber(spec.answer) ? ` (± ${withUnit(String(tolerance), spec.unit)})` : ''}`;
 }
 
+/**
+ * What players answered to a single question, most given first, for the big screen (no names):
+ * every right answer (any accepted spelling) as one bar, each wrong answer (same once normalised)
+ * as its own, and past `max` bars the rarest wrong ones as "Something else".
+ */
+function commonAnswers(spec: AnswerSpec, given: string[], max: number): { label: string; count: number; right: boolean }[] {
+  const groups = new Map<string, { label: string; count: number; right: boolean }>();
+  for (const g of given) {
+    const right = matches(spec, g);
+    const key = right ? '' : normalise(g);
+    if (!right && !key) continue;
+    const group = groups.get(key);
+    if (group) group.count += 1;
+    else groups.set(key, { label: withUnit(right ? spec.answer : g, spec.unit), count: 1, right });
+  }
+  const sorted = [...groups.values()].sort((a, b) => b.count - a.count);
+  if (sorted.length <= max) return sorted;
+  const kept = sorted.slice(0, max - 1);
+  const rightGroup = sorted.find((g) => g.right);
+  if (rightGroup && !kept.includes(rightGroup)) kept.splice(max - 2, 1, rightGroup);
+  const rest = sorted.filter((g) => !kept.includes(g)).reduce((n, g) => n + g.count, 0);
+  return [...kept, { label: 'Something else', count: rest, right: false }];
+}
+
+/** Columns for `n` cards on one presentation slide. */
+function columnsFor(n: number): number {
+  return n <= 4 ? n : n <= 6 ? 3 : 4;
+}
+
 export default defineModule<Config, State, Input, Evaluation>({
   manifest: manifestJson as unknown as Manifest,
   configurationSchema: schemaJson,
@@ -237,6 +266,67 @@ export default defineModule<Config, State, Input, Evaluation>({
       canSubmit: true,
       status: single(c) ? plural(c.points, 'point') : `${share > 0 ? `${share} per correct answer · ` : ''}${c.points} for all ${c.answers.length}${c.anyOrder ? ' · any order' : ''}`,
     };
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    // Step 1: the question (and how the room answered); step 2: the same, with the right answer(s).
+    // Aggregates only: no names or points.
+    const c = state.config;
+    const total = evaluations.length;
+    if (total === 0 || c.answers.length === 0) return [];
+    const head: UINode[] = [ui.title(c.question, { align: 'center' })];
+    const media = c.media ? ui.image(ctx.mediaUrl(c.media), { maxHeight: '40vh' }) : null;
+
+    if (single(c)) {
+      const spec = c.answers[0]!;
+      const common = commonAnswers(spec, evaluations.map((e) => e.given[0] ?? ''), 6);
+      const right = evaluations.filter((e) => e.allCorrect).length;
+      const step = (reveal: boolean): UINode => {
+        const chart = ui.barChart(
+          common.map((a) => {
+            const lit = reveal && a.right;
+            return { label: a.label, value: a.count, highlight: lit, tone: lit ? ('success' as const) : ('neutral' as const) };
+          }),
+        );
+        const body: UINode[] = common.length ? [media ? ui.grid(2, [media, chart], { gap: 'lg' }) : chart] : media ? [media] : [];
+        return ui.stack(
+          [
+            ...head,
+            ...body,
+            reveal ? ui.display(answerText(spec), { tone: 'success' }) : ui.display('?', { tone: 'muted' }),
+            ui.caption(reveal ? `${right} of ${total} right` : `${total} ${total === 1 ? 'answer' : 'answers'}`, { align: 'center' }),
+          ],
+          { gap: 'md', align: 'stretch' },
+        );
+      };
+      return [{ steps: [step(false), step(true)], stepSeconds: 10 }];
+    }
+
+    // Several answers: a card per answer, its answer hidden, then revealed with how many got it.
+    const perfect = evaluations.filter((e) => e.allCorrect).length;
+    const step = (reveal: boolean): UINode => {
+      const cards = c.answers.map((spec, i) => {
+        const right = evaluations.filter((e) => (c.anyOrder ? e.given.some((g) => matches(spec, g)) : e.correct[i])).length;
+        return ui.card(
+          [
+            ui.subtitle(c.anyOrder ? `Answer ${i + 1}` : labelOf(c, i), { align: 'center' }),
+            reveal ? ui.display(answerText(spec), { tone: 'success' }) : ui.display('?', { tone: 'muted' }),
+            ui.caption(reveal ? `${right} of ${total} right` : ' ', { align: 'center' }),
+          ],
+          reveal ? 'success' : 'neutral',
+        );
+      });
+      return ui.stack(
+        [
+          ...head,
+          ...(media ? [media] : []),
+          ui.grid(columnsFor(cards.length), cards, { gap: 'md' }),
+          ui.caption(reveal ? `${perfect} of ${total} got all ${c.answers.length}` : `${total} ${total === 1 ? 'player' : 'players'} answered`, { align: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      );
+    };
+    return [{ steps: [step(false), step(true)], stepSeconds: Math.min(20, 8 + 2 * c.answers.length) }];
   },
 
   resultsView(state, evaluations) {

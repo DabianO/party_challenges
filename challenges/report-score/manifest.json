@@ -1,7 +1,7 @@
 {
   "id": "report-score",
   "name": "Report Your Score",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "apiVersion": "2",
   "category": "other",
   "description": "Players fill in a number that counts as their points, decided by something outside the app (a darts round, a pub quiz). Up to a maximum: a number above it costs points and closes the challenge for that player.",

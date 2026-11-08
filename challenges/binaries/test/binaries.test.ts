@@ -37,7 +37,7 @@ function answer(state: State, ctx: InstanceContext, who: PlayerRef, id: string, 
 
 describe('binaries', () => {
   it('has a consistent manifest: a Hot Take scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'binaries', version: '1.1.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
+    expect(mod.manifest).toMatchObject({ id: 'binaries', version: '1.2.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -46,8 +46,10 @@ describe('binaries', () => {
     let state = mod.createInstance(config, ctx);
     state = answer(state, ctx, ada, 's0', 1);
     const view = mod.guestView(state, ada, ctx);
-    expect(view.canSubmit).toBe(false);
-    expect(view.status).toBe('1 of 2 answered · change them any time');
+    // Optional lock-in: the button stays, Back keeps the answers open.
+    expect(view.canSubmit).toBe(true);
+    expect(view.status).toBe('1 of 2 answered · change them any time, or lock them in');
+    expect(JSON.stringify(view.ui)).toContain('Done: lock in my answers');
     const json = JSON.stringify(view.ui);
     expect(json).toContain('Taylor Swift is overrated');
     expect(json).toContain(
@@ -84,8 +86,9 @@ describe('binaries', () => {
     // Activity counts new and changed answers; the same answer again changes nothing.
     expect(answer(state, ctx, ada, 's0', 0)).toBe(state);
     expect(state.activity.s0).toBe(2);
-    // Nothing to submit: answering is live only.
-    expect(mod.validateInput(state, ada, {}, ctx)).toMatchObject({ ok: false });
+    // Submitting only locks the answers in, once there is at least one.
+    expect(mod.validateInput(state, ada, {}, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, { id: 'nobody', displayName: 'Nobody', connected: true }, {}, ctx)).toEqual({ ok: false, reason: 'Answer at least one first' });
   });
 
   it('puts every statement in the spotlight with a Yes/No bar chart and the share of yes', () => {

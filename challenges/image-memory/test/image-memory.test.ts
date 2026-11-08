@@ -51,7 +51,7 @@ const sub = (playerId: string, answer: unknown, startedAt: number, elapsedMs = 1
 describe('image-memory', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('image-memory');
-    expect(mod.manifest.version).toBe('2.2.0');
+    expect(mod.manifest.version).toBe('2.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -214,5 +214,33 @@ describe('image-memory', () => {
     expect(bob).toContain('0 points');
     expect(JSON.stringify(results.guestUi!(players[3]!))).toContain('did not answer');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('No answers yet');
+  });
+
+  it('presents the image and question, how the room answered, then the right answer: no names', () => {
+    const { ctx, clock } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    const evaluations = [mod.evaluate(state, [sub('p1', 'C', clock.now)], ctx), mod.evaluate(state, [sub('p2', 'A', clock.now)], ctx), mod.evaluate(state, [sub('p3', 'C', clock.now)], ctx)];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const [ask, room, reveal] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(slides[0]!.steps).toHaveLength(3);
+    // Step 1: the picture, the question and the options; nothing about the answer.
+    expect(ask).toContain('https://cdn.test/table');
+    expect(ask).toContain(config.question);
+    expect(ask).toContain('"label":"D. Five"');
+    expect(ask).not.toMatch(/highlight|success|bar-chart/);
+    // Step 2: how the room answered, still without the right one.
+    expect(room).toContain('{"label":"C. Four","value":2}');
+    expect(room).toContain('3 answers');
+    expect(room).not.toMatch(/highlight|success/);
+    // Step 3: the right answer.
+    expect(reveal).toContain('{"label":"C. Four","value":2,"highlight":true,"tone":"success"}');
+    expect(reveal).toContain('"text":"C. Four"');
+    expect(reveal).toContain('2 of 3 remembered it');
+    expect(JSON.stringify(slides)).not.toMatch(/Alice|Bob|Cara|points|ranking/);
+    // Nobody answered: the question, then the answer.
+    const empty = mod.presentation!(state, [], ctx);
+    expect(empty[0]!.steps).toHaveLength(2);
+    expect(JSON.stringify(empty[0]!.steps[1])).toContain('"text":"C. Four"');
   });
 });

@@ -9,10 +9,11 @@
  * later. The crosshair starts on its home base in the corner and stays wherever it is: players
  * can steer and shoot at any time (every shot flashes on the screen), but only a shot on a
  * balloon does anything. A miss at a balloon means a short reload for that player, so hammering
- * the button does not win.
+ * the button does not win. When nobody has moved it for a minute, it goes back home.
  *
  * Timing is server-side: an instance timer `balloon` brings the next balloon (paused with the
- * game), `burst` clears the pop from the screen. Points are awarded when the host closes it.
+ * game), `burst` clears the pop from the screen, `home` (rescheduled with every move) sends an
+ * idle crosshair back to its base. Points are awarded when the host closes it.
  *
  * The field is 16 × 9 units (the big screen's shape), so a step is as long across as down.
  */
@@ -85,6 +86,8 @@ const STEP: Record<Speed, number> = { slow: 0.25, normal: 0.4, fast: 0.65 };
 const MAX_BATCH = 20;
 const RELOAD_MS = 1500;
 const BURST_SECONDS = 4;
+/** Nobody moved the crosshair for this long: back to its home base. */
+export const IDLE_HOME_SECONDS = 60;
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6'];
 
 function intervalSeconds(config: Config): number {
@@ -159,6 +162,7 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
   onTimer(state, tag, ctx) {
     if (tag === 'balloon') return state.balloon ? state : spawn(state, ctx);
     if (tag === 'burst') return { ...state, burst: null };
+    if (tag === 'home') return { ...state, crosshair: { ...HOME } };
     return state;
   },
 
@@ -181,6 +185,8 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
     if ('move' in aim) {
       const step = stepOf(state.config);
       const crosshair = { x: clamp(state.crosshair.x + aim.move[0] * step, 0, WIDTH), y: clamp(state.crosshair.y + aim.move[1] * step, 0, HEIGHT) };
+      // Left alone for a minute, it goes back home (every move starts the minute again).
+      ctx.schedule('home', IDLE_HOME_SECONDS);
       return { ...state, crosshair };
     }
     const now = ctx.now();

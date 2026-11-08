@@ -6,7 +6,7 @@
  * the predictions are tallied and the instance waits in EVALUATING until the host picks
  * what actually happened. The host can leave the form until the event has happened.
  */
-import { defineModule, ui, type ChoiceOption, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type ChoiceOption, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -210,6 +210,37 @@ export default defineModule<Config, State, Input, Evaluation>({
       ],
       { gap: 'lg', align: 'center' },
     );
+  },
+
+  presentation(state, evaluations): PresentationSlide[] {
+    // Step 1: the question and what the room predicted; step 2: the same, with what actually happened.
+    // Aggregates only: no names of who called it, no points.
+    const evaluation = evaluations[0];
+    const total = evaluation?.rows.length ?? 0;
+    if (!evaluation || total === 0) return [];
+    const outcome = new Set(evaluation.outcome ?? []);
+    // Many options (e.g. every player): leave out those nobody predicted, unless they happened.
+    const options = state.options.length > 8 ? state.options.filter((o) => (evaluation.distribution[o.id] ?? 0) > 0 || outcome.has(o.id)) : state.options;
+    const correct = evaluation.rows.filter((r) => outcome.has(r.answer)).length;
+    const step = (reveal: boolean): UINode => {
+      const chart = ui.barChart(
+        options.map((o) => {
+          const lit = reveal && outcome.has(o.id);
+          return { label: o.label, value: evaluation.distribution[o.id] ?? 0, highlight: lit, tone: lit ? ('success' as const) : ('neutral' as const) };
+        }),
+        { percent: true },
+      );
+      return ui.stack(
+        [
+          ui.title(state.config.question, { align: 'center' }),
+          chart,
+          reveal ? ui.display(state.options.filter((o) => outcome.has(o.id)).map((o) => o.label).join(' & '), { tone: 'success' }) : ui.display('?', { tone: 'muted' }),
+          ui.caption(reveal ? (correct ? `${correct} of ${total} called it` : 'Nobody saw that coming!') : `${plural(total, 'prediction')}`, { align: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      );
+    };
+    return [{ steps: outcome.size ? [step(false), step(true)] : [step(false)], stepSeconds: 10 }];
   },
 
   resultsView(state, evaluations) {

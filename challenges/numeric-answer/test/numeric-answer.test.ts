@@ -50,7 +50,7 @@ const sub = (playerId: string, answer: unknown, startedAt: number, elapsedMs = 1
 describe('numeric-answer', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('numeric-answer');
-    expect(mod.manifest.version).toBe('2.2.0');
+    expect(mod.manifest.version).toBe('2.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -179,5 +179,36 @@ describe('numeric-answer', () => {
     expect(bob).toContain('2 legs off');
     expect(JSON.stringify(results.guestUi!(players[3]!))).toContain('did not answer');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('No answers yet');
+  });
+
+  it('presents the room spread of answers, then the answer, without names or points', () => {
+    const { ctx, clock } = fakeCtx();
+    const state = mod.createInstance({ ...config, question: 'How tall is the tower?', correctAnswer: 330, tolerance: 10, unit: 'm', media: 'media://tower' }, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const answers = [200, 250, 320, 335, 400, 610];
+    const evaluations = answers.map((a, i) => mod.evaluate(state, [sub(players[i % 4]!.id, a, clock.now)], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const [first, second] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(slides[0]!.steps).toHaveLength(2);
+    // Step 1: question, picture and the spread, but not the answer.
+    expect(first).toContain('How tall is the tower?');
+    expect(first).toContain('media://tower');
+    expect(first).toContain('"distribution"');
+    expect(first).toContain('200 m');
+    expect(first).toContain('610 m');
+    expect(first).not.toContain('330');
+    expect(first).not.toContain('"marker"');
+    // Step 2: the same layout with the answer and how many got it.
+    expect(second).toContain('330 m ± 10');
+    expect(second).toContain('"marker"');
+    expect(second).toContain('2 of 6 right');
+    for (const step of [first, second]) {
+      for (const p of players) expect(step).not.toContain(p.displayName);
+      expect(step).not.toMatch(/points|"ranking"/);
+    }
+    // Same nodes in both steps, so the slide changes in place.
+    const kinds = (n: unknown) => (n as { children: { type: string }[] }).children.map((c) => c.type);
+    expect(kinds(slides[0]!.steps[0])).toEqual(kinds(slides[0]!.steps[1]));
   });
 });

@@ -1,7 +1,7 @@
 {
   "id": "multi-answer",
   "name": "Answer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "apiVersion": "2",
   "category": "knowledge",
   "description": "A question with one answer, or several. Text is forgiving about spelling and case; numbers can have a tolerance. With several answers each correct one scores a share of the points.",

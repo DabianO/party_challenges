@@ -94,9 +94,13 @@ function statementView(state: State, s: { id: string; text: string }, mine?: num
   );
 }
 
-/** Columns for `n` statements on one presentation slide, so they all fit. */
-function columnsFor(n: number): number {
-  return n <= 2 ? n : n <= 4 ? 2 : n <= 9 ? 3 : n <= 16 ? 4 : 5;
+/**
+ * Columns for `n` statements on one presentation slide, so they all fit. Each statement is a
+ * wide seven-column chart, so fewer columns than usual: two up to eight statements (five
+ * statements make three rows, not two cramped rows of three).
+ */
+export function columnsFor(n: number): number {
+  return n <= 1 ? 1 : n <= 8 ? 2 : n <= 15 ? 3 : 4;
 }
 
 const INSTRUCTIONS = 'Answer as many as you like and change your mind any time. Go back to the other challenges whenever you want and come back later.';
@@ -110,8 +114,9 @@ export default defineModule<Config, State, unknown, Evaluation>({
   },
 
   // Answers are live actions; there is nothing to submit.
-  validateInput() {
-    return { ok: false, reason: 'Move the sliders to answer' };
+  // Answers are live actions; submitting only locks them in for good (Back keeps them open).
+  validateInput(state, player) {
+    return answeredBy(state, player.id) > 0 ? { ok: true } : { ok: false, reason: 'Answer at least one first' };
   },
 
   handleInput(state) {
@@ -194,11 +199,14 @@ export default defineModule<Config, State, unknown, Evaluation>({
               }),
             ]),
           ),
+          // Optional: going back keeps everything open to change later.
+          ui.submit('✓ Done: lock in my answers', { tone: 'neutral', disabled: answered === 0 }),
+          ui.caption('Or just go back: your answers are kept, and you can change them until the challenge closes.', { align: 'center' }),
         ],
         { gap: 'md', align: 'stretch' },
       ),
-      canSubmit: false,
-      status: `${answered} of ${statements.length} answered · change them any time`,
+      canSubmit: true,
+      status: `${answered} of ${statements.length} answered · change them any time, or lock them in`,
     };
   },
 

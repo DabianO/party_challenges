@@ -69,7 +69,7 @@ const sub = (playerId: string, input: { colors: { runId: string; answers: { choi
 
 describe('color-match', () => {
   it('has a consistent manifest: automatic, immediate, replays on by default', () => {
-    expect(mod.manifest).toMatchObject({ id: 'color-match', version: '1.1.0', apiVersion: '2', category: 'skill', results: 'immediate', suggestedReplay: true });
+    expect(mod.manifest).toMatchObject({ id: 'color-match', version: '1.2.0', apiVersion: '2', category: 'skill', results: 'immediate', suggestedReplay: true });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -177,6 +177,28 @@ describe('color-match', () => {
     const plain = mod.onAction!(mod.onAttemptStart!(state, bea, ctx), bea, { colors: 'start' }, ctx);
     expect(quickRounds(mod.guestView(plain, bea, ctx).ui)).toMatchObject({ secondsPerRound: 1.5 });
     expect(quickRounds(mod.guestView(plain, bea, ctx).ui).rounds[0]!.options).toHaveLength(4);
+  });
+
+  it('presents the room taps and levels without names, points or rankings', () => {
+    const { ctx } = fakeCtx();
+    let state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const a = play(state, ctx, ada, 8, 700);
+    state = a.state;
+    const b = play(state, ctx, bea, 10, 500, '2');
+    state = b.state;
+    const evaluations = [mod.evaluate(state, [sub('p1', a.input, 0)], ctx), mod.evaluate(state, [sub('p2', b.input, 0)], ctx)];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Tap the colour, not the word', 'Levels played']);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const json = JSON.stringify(slides);
+    expect(json).toContain('"text":"20"'); // colour words in both tries
+    expect(json).toContain('1 perfect try');
+    expect(json).toContain('{"label":"Right colour","value":18,"tone":"success"}');
+    expect(json).toContain('{"label":"Fell for the word","value":2,"tone":"danger"}');
+    expect(json).toContain('On average 9 of 10 right · 0.59 s per correct tap'); // (8 × 0.7 + 10 × 0.5) / 18
+    expect(json).toMatch(/"label":"Level 1 · [^"]*","value":1\}.*"label":"Level 2 · [^"]*","value":1\}/);
+    expect(json).not.toMatch(/Ada|Bea|points"|"ranking"/);
   });
 
   it('plays games made before levels with the default levels', () => {

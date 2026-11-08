@@ -5,8 +5,10 @@
  * Each player types a short entry (a title or one-liner) and performs live. The engine
  * routes the entry to the host queue (or a peer / hybrid, per game settings); the host
  * may approve/reject or enter 0–10 points. This module only maps the decision to points.
+ * Once closed, the host can show the prompt with every entry and who performed it on the big
+ * screen, six to a slide (`presentation`); rejected entries are left out without a word.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -39,6 +41,9 @@ interface Evaluation {
   note: string | null;
   decidedBy: 'peer' | 'host' | null;
 }
+
+/** Entries per presentation slide. */
+const PER_SLIDE = 6;
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
@@ -159,6 +164,22 @@ export default defineModule<Config, State, Input, Evaluation>({
     if (c.instructions) children.push(ui.text(c.instructions, { align: 'center', tone: 'muted' }));
     children.push(ui.badge(`${count} ${count === 1 ? 'entry' : 'entries'} so far`, count > 0 ? 'primary' : 'muted'));
     return ui.stack(children, { gap: 'lg', align: 'center' });
+  },
+
+  presentation(state, evaluations): PresentationSlide[] {
+    const shown = evaluations.filter((e) => e.approved && e.text);
+    const slides: PresentationSlide[] = [];
+    for (let i = 0; i < shown.length; i += PER_SLIDE) {
+      const page = shown.slice(i, i + PER_SLIDE);
+      const columns = page.length === 1 ? 1 : page.length <= 4 ? 2 : 3;
+      const cells = page.map((e) => ui.card([ui.subtitle(`“${e.text}”`, { align: 'center' }), ui.caption(e.displayName, { align: 'center' })]));
+      slides.push({
+        caption: shown.length > PER_SLIDE ? `Entries ${i + 1}–${i + page.length} of ${shown.length}` : undefined,
+        steps: [ui.stack([ui.title(state.config.prompt, { align: 'center' }), ui.grid(columns, cells, { gap: 'md' })], { gap: 'lg', align: 'stretch' })],
+        stepSeconds: Math.max(10, page.length * 3),
+      });
+    }
+    return slides;
   },
 
   resultsView(state, evaluations) {

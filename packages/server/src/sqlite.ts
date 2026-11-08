@@ -20,7 +20,7 @@ import type {
 import type { ActivityItem, ScoreLedgerEntry } from '@challenge/contract';
 
 /** Bump when the tables change; add a migration step in SqliteRepository.migrate(). */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS games (
@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS challenge_instances (
   title TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT '',
   allow_replay INTEGER NOT NULL DEFAULT 0,
+  in_presentation INTEGER NOT NULL DEFAULT 1,
   configuration TEXT NOT NULL,
   module_state TEXT,
   phase TEXT NOT NULL,
@@ -185,6 +186,11 @@ const MIGRATE_TO_V7 = `
   ALTER TABLE players ADD COLUMN avatar TEXT;
 `;
 
+/** v7 → v8: whether a challenge is part of the results presentation. */
+const MIGRATE_TO_V8 = `
+  ALTER TABLE challenge_instances ADD COLUMN in_presentation INTEGER NOT NULL DEFAULT 1;
+`;
+
 type Row = Record<string, unknown>;
 
 const json = (v: unknown): string => JSON.stringify(v ?? null);
@@ -225,7 +231,7 @@ export class SqliteRepository implements Repository {
    * Schema versioning via SQLite's user_version. Version 1 was the sequential game model
    * (contract v1); its games cannot run on the board engine (different tables, module
    * versions no longer installed), so a legacy database is backed up and rebuilt.
-   * Versions 2 to 6 are upgraded in place (MIGRATE_TO_V3 … MIGRATE_TO_V7).
+   * Versions 2 to 7 are upgraded in place (MIGRATE_TO_V3 … MIGRATE_TO_V8).
    */
   private migrate(path: string): void {
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
@@ -240,7 +246,8 @@ export class SqliteRepository implements Repository {
         if (version <= 3) this.db.exec(MIGRATE_TO_V4);
         if (version <= 4) this.db.exec(MIGRATE_TO_V5);
         if (version <= 5) this.db.exec(MIGRATE_TO_V6);
-        this.db.exec(MIGRATE_TO_V7);
+        if (version <= 6) this.db.exec(MIGRATE_TO_V7);
+        this.db.exec(MIGRATE_TO_V8);
         this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
         this.db.exec('COMMIT');
       } catch (err) {
@@ -315,9 +322,9 @@ export class SqliteRepository implements Repository {
         insPlayer.run(p.id, game.id, p.displayName, p.sessionTokenHash, p.joinedAt, p.removedAt, p.reclaimable ? 1 : 0, p.avatar ?? null);
       }
       const insInst = db.prepare(
-        `INSERT INTO challenge_instances (id, game_id, module_id, module_version, sort_order, title, category, allow_replay, configuration, module_state, phase, availability,
+        `INSERT INTO challenge_instances (id, game_id, module_id, module_version, sort_order, title, category, allow_replay, in_presentation, configuration, module_state, phase, availability,
            assigned_player_ids, evaluation_mode, seed, created_at, opened_at, closed_at, timers, evaluation, results, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const i of game.instances) {
         insInst.run(
@@ -329,6 +336,7 @@ export class SqliteRepository implements Repository {
           i.title ?? '',
           i.category ?? '',
           i.allowReplay ? 1 : 0,
+          i.inPresentation === false ? 0 : 1,
           json(i.configuration),
           json(i.moduleState),
           i.phase,
@@ -421,6 +429,7 @@ export class SqliteRepository implements Repository {
         title: String(i.title ?? ''),
         category: String(i.category ?? ''),
         allowReplay: Boolean(i.allow_replay),
+        inPresentation: i.in_presentation === undefined || i.in_presentation === null ? true : Boolean(i.in_presentation),
         configuration: parse(i.configuration, {}),
         moduleState: parse(i.module_state, null),
         phase: i.phase as PersistedInstance['phase'],

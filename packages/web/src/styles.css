@@ -2079,6 +2079,22 @@ details[open] > summary::before {
   width: 34px;
   min-width: 34px;
 }
+/* "In presentation": a checkbox with a film icon; the words only where there is room. */
+.challenge-row-present {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (max-width: 1100px) {
+  .challenge-row-present-label {
+    display: none;
+  }
+}
 .setup-group {
   margin: 10px 0 2px;
 }
@@ -3325,9 +3341,9 @@ body.has-bg-image .challenge-top {
   gap: 10px;
 }
 .artwork-body {
-  /* Same shape as the territory grid (112 × 70), so the window fills the frame. */
-  width: min(100%, calc(72vh * 1.6));
-  aspect-ratio: 16 / 10;
+  /* Same shape as the territory grid (136 × 56), so the window fills the frame. */
+  width: min(100%, calc(72vh * 136 / 56));
+  aspect-ratio: 136 / 56;
   margin: 0 auto;
   flex: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
@@ -3918,17 +3934,28 @@ body.has-bg-image .challenge-top {
 .ui-presentation .ui-image img {
   border-radius: var(--radius);
 }
-/* A blob field takes the territory grid's shape (112 × 70) instead of filling a panel. */
+/* A blob field takes the territory grid's shape (136 × 56) instead of filling a panel: as big
+   as the slide allows, with room for the heading and the line of shares under it. */
 .ui-presentation .blob-field {
   height: auto;
-  aspect-ratio: 16 / 10;
-  width: min(100%, calc(58vh * 1.6));
+  aspect-ratio: 136 / 56;
+  width: min(100%, calc(66vh * 136 / 56));
   margin: 0 auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
 }
 /* Many statements on one slide (Hot Takes): smaller headings per card. */
-.ui-presentation .ui-grid .ui-text-title {
-  font-size: clamp(1.1rem, 1.9vw, 1.7rem);
+.ui-presentation .ui-grid .ui-text-title,
+.ui-presentation .ui-grid .ui-text-subtitle {
+  font-size: clamp(1rem, 1.7vw, 1.6rem);
+}
+/* Slides break lines between words (hyphenating a word too long for its card), never mid-word. */
+.ui-presentation .ui-text {
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+/* A big answer inside a card (e.g. one capital per card) stays one word on one line. */
+.ui-presentation .ui-grid .ui-text-display {
+  font-size: clamp(2rem, 4vw, 4.5rem);
 }
 
 /* A sentence with entries rolling through its blanks (`spool`). */

@@ -420,7 +420,7 @@ describe('architecture acceptance: every module runs on the unmodified engine', 
     }
     const end = lastSnapshot(events, 'main').presentation!;
     expect(end).toMatchObject({ autoplay: false, endsAt: null, index: end.total - 1 });
-    expect([...seen, end.instanceId].sort()).toEqual([...presentable].sort());
+    expect([...new Set([...seen, end.instanceId])].sort()).toEqual([...presentable].sort());
     expect(lastSnapshot(events, `player:${players[0]!.id}`).presentation).toBeNull();
     game.performHostAction({ action: 'stop-presentation' });
     expect(lastSnapshot(events, 'main').presentation).toBeNull();

@@ -60,7 +60,7 @@ const submission = (playerId: string, text: unknown, judgements: Judgement[] = [
 describe('open-performance', () => {
   it('has a consistent v2 manifest with judging metadata', () => {
     expect(mod.manifest.id).toBe('open-performance');
-    expect(mod.manifest.version).toBe('2.2.0');
+    expect(mod.manifest.version).toBe('2.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.results).toBe('immediate');
     expect(mod.manifest.evaluation.mode).toBe('host');
@@ -195,5 +195,35 @@ describe('open-performance', () => {
     expect(bob).toContain('Too short');
     expect(results.guestUi!(players[2]!)).toEqual(results.ui);
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('No approved performances yet.');
+  });
+});
+
+describe('open-performance presentation', () => {
+  it('shows the prompt with every approved entry and who performed it, without points or verdicts', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    const evaluations = [
+      mod.evaluate(state, [submission('p1', 'Alice pitch', [judgement('approve', 'host', { points: 8, note: 'Great energy' })])], ctx),
+      mod.evaluate(state, [submission('p2', 'Bob pitch', [judgement('reject', 'host', { note: 'Too short' })])], ctx),
+      mod.evaluate(state, [submission('p3', 'Cara pitch', [judgement('approve')])], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const shown = JSON.stringify(slides);
+    expect(shown).toContain(config.prompt);
+    expect(shown).toContain('“Alice pitch”');
+    expect(shown).toContain('“Cara pitch”');
+    expect(shown).not.toContain('Bob');
+    expect(shown).not.toMatch(/Great energy|Too short|reject|approved|points|\+8/i);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+  });
+
+  it('puts six entries on a slide', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    const evaluations = Array.from({ length: 13 }, (_, i) => mod.evaluate(state, [submission('p1', `Pitch ${i}`, [judgement('approve')])], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Entries 1–6 of 13', 'Entries 7–12 of 13', 'Entries 13–13 of 13']);
+    expect(JSON.stringify(slides[0])).toContain('"type":"grid","columns":3');
   });
 });

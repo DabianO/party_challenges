@@ -5,7 +5,7 @@
  * `viewSeconds` (per-player `hide` timer), then hidden and replaced by a multiple-choice
  * question with its own `answerSeconds` time limit (per-player `lock` timer).
  */
-import { defineModule, ui, type ChoiceOption, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type ChoiceOption, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -61,6 +61,10 @@ function letteredOptions(config: Config): ChoiceOption[] {
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
 function pct(part: number, total: number): number {
@@ -210,6 +214,39 @@ export default defineModule<Config, State, Input, Evaluation>({
     // Public card: never the image or the question, so nobody can prepare before Start.
     const c = state.config;
     return ui.caption(`Memorise an image for ${c.viewSeconds} seconds, then answer a question about it.`);
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    // The picture and its question (does the room still remember?), how everyone answered,
+    // then the right answer. The picture stays on the left in every step.
+    const c = state.config;
+    if (c.options.length === 0) return [];
+    const options = letteredOptions(c);
+    const correctLetter = correctLetterOf(c);
+    const counts = countsOf(c, evaluations);
+    const right = evaluations.filter((e) => e.correct).length;
+    const picture = ui.image(ctx.mediaUrl(c.image), { maxHeight: '60vh', alt: 'The image' });
+    const question = ui.title(c.question, { align: 'center' });
+    const bars = (reveal: boolean) =>
+      ui.barChart(
+        options.map((o) => ({
+          label: o.label,
+          value: counts[o.id] ?? 0,
+          ...(reveal && o.id === correctLetter ? { highlight: true, tone: 'success' as const } : {}),
+        })),
+        { percent: true },
+      );
+    const side = (children: UINode[]) => ui.grid(2, [picture, ui.stack([question, ...children], { gap: 'lg', align: 'stretch' })], { gap: 'lg' });
+    const steps: UINode[] = [side([ui.list(options.map((o) => ({ label: o.label }))), ui.caption('Do you still remember?', { align: 'center' })])];
+    if (evaluations.length > 0) steps.push(side([bars(false), ui.caption(plural(evaluations.length, 'answer'), { align: 'center' })]));
+    steps.push(
+      side([
+        evaluations.length > 0 ? bars(true) : ui.list(options.map((o) => ({ label: o.label, ...(o.id === correctLetter ? { tone: 'success' as const, highlight: true } : {}) }))),
+        ui.display(`${correctLetter}. ${c.options[correctIndexOf(c)] ?? ''}`, { tone: 'success' }),
+        ...(evaluations.length > 0 ? [ui.row([ui.badge(`${right} of ${evaluations.length} remembered it`, right > 0 ? 'success' : 'muted')], { justify: 'center' })] : []),
+      ]),
+    );
+    return [{ steps, stepSeconds: 8 }];
   },
 
   resultsView(state, evaluations, ctx) {

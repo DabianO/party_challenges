@@ -94,7 +94,8 @@ describe('the results presentation', () => {
     game.moduleAction(ada.id, yesNo.id, { answer: { id: 's0', value: 1 } });
     game.performHostAction({ action: 'close-challenge', instanceId: blanks.id });
     // Only closed challenges can be presented.
-    expect(host().presentationDeck).toEqual([{ instanceId: blanks.id, title: 'Blanks', category: '', slides: 2, included: false }]);
+    // Until a presentation runs, `included` is the setup's choice (on by default).
+    expect(host().presentationDeck).toEqual([{ instanceId: blanks.id, title: 'Blanks', category: '', slides: 2, included: true }]);
     expect(() => game.performHostAction({ action: 'start-presentation', instanceIds: [yesNo.id] })).toThrow(/nothing to present \(is it closed\?\)/);
     game.performHostAction({ action: 'close-challenge', instanceId: yesNo.id });
 
@@ -157,6 +158,46 @@ describe('the results presentation', () => {
     game.performHostAction({ action: 'stop-presentation' });
     expect(main()).toBeNull();
     expect(() => go('next')).toThrow(/No presentation is running/);
+  });
+
+  it('presents what the setup includes, which can still change once the game is over', () => {
+    const { engine, events } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Party' });
+    const blanks = game.addChallenge('fill-in-the-blanks', { sentences: [{ text: 'Parties need ___.' }] }, { title: 'Blanks' });
+    const yesNo = game.addChallenge('binaries', { statements: [{ text: 'Pineapple belongs on pizza' }] }, { inPresentation: false });
+    expect(blanks.inPresentation).toBe(true);
+    expect(yesNo.inPresentation).toBe(false);
+    expect(game.exportSetup().challenges.map((c) => c.inPresentation)).toEqual([true, false]);
+    expect(() => game.updateChallenge(yesNo.id, undefined, { inPresentation: 'yes' as never })).toThrow(/true or false/);
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'host' });
+    game.connect({ role: 'main' });
+    game.performHostAction({ action: 'start-game' });
+    game.startAttempt(ada.id, blanks.id);
+    game.submit(ada.id, blanks.id, { s0b0: 'snacks' }, true);
+    game.startAttempt(ada.id, yesNo.id);
+    game.moduleAction(ada.id, yesNo.id, { answer: { id: 's0', value: 1 } });
+    game.performHostAction({ action: 'close-challenge', instanceId: blanks.id });
+    game.performHostAction({ action: 'close-challenge', instanceId: yesNo.id });
+    const host = () => lastSnapshot(events, 'host');
+    expect(host().challenges.map((c) => c.inPresentation)).toEqual([true, false]);
+    expect(host().presentationDeck.map((d) => [d.instanceId, d.included])).toEqual([
+      [blanks.id, true],
+      [yesNo.id, false],
+    ]);
+    game.performHostAction({ action: 'end-game' });
+    game.performHostAction({ action: 'close-game' });
+    // Over, but the presentation is still to come: only this option may change.
+    expect(() => game.updateChallenge(yesNo.id, undefined, { title: 'Late' })).toThrow();
+    game.updateChallenge(blanks.id, undefined, { inPresentation: false });
+    expect(() => game.performHostAction({ action: 'start-presentation' })).toThrow(/Every closed challenge is left out/);
+    game.updateChallenge(yesNo.id, undefined, { inPresentation: true });
+    game.performHostAction({ action: 'start-presentation' });
+    expect(lastSnapshot(events, 'main').presentation).toMatchObject({ instanceId: yesNo.id, total: 1 });
+    // The host may still pick by hand, whatever the setup says.
+    game.performHostAction({ action: 'start-presentation', instanceIds: [blanks.id] });
+    expect(lastSnapshot(events, 'main').presentation).toMatchObject({ instanceId: blanks.id });
   });
 
   it('switches replays on for modules that suggest them', () => {

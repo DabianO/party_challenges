@@ -68,3 +68,32 @@ describe('caption-this module', () => {
     expect(JSON.stringify(mod.presentSubmission!(state, submission('p1', 'Shown to judge'), ctx))).not.toContain('Ada');
   });
 });
+
+describe('caption-this presentation', () => {
+  const approve = [{ assignmentId: 'e', by: 'peer' as const, judgePlayerId: 'p2', decision: 'approve' as const, decidedAt: 3 }];
+  const reject = [{ assignmentId: 'e', by: 'peer' as const, judgePlayerId: 'p1', decision: 'reject' as const, decidedAt: 3 }];
+
+  it('shows the picture with every approved caption, six to a slide, without points or verdicts', () => {
+    const many: PlayerRef[] = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, displayName: `Player ${i}`, connected: true }));
+    const { ctx } = fakeContext(many);
+    const state = mod.createInstance(config, ctx);
+    const evaluations = many.map((p, i) => mod.evaluate(state, [submission(p.id, `Caption ${i}`, i === 3 ? reject : approve)], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(2);
+    expect(slides.map((s) => s.caption)).toEqual(['Captions 1–6 of 7', 'Captions 7–7 of 7']);
+    const all = JSON.stringify(slides);
+    expect(all.match(/\/media\/pic/g)).toHaveLength(2); // the picture on every slide
+    for (const i of [0, 1, 2, 4, 5, 6, 7]) expect(all).toContain(`“Caption ${i}”`);
+    expect(all).toContain('Player 0');
+    expect(all).not.toContain('Caption 3'); // rejected: left out, not marked
+    expect(all).not.toMatch(/reject|approved|points/i);
+    expect(slides.every((s) => s.steps.length === 1 && (s.stepSeconds ?? 10) >= 10)).toBe(true);
+  });
+
+  it('has nothing to show without captions', () => {
+    const { ctx } = fakeContext(players);
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    expect(mod.presentation!(state, [mod.evaluate(state, [submission('p1', 'Nope', reject)], ctx)], ctx)).toEqual([]);
+  });
+});

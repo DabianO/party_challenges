@@ -9,9 +9,16 @@
  * Every entry is its own attempt (`attempts: "repeat"`), so an entry above the maximum is
  * scored on its own (minus `penalty`) the moment it comes in. The host can open the
  * challenge again for that player (`closedFor` / `reopenFor`); the deduction stays. Once a
- * valid number is in, the player is done (`canStart` → finished).
+ * valid number is in, the player is done (`canStart` → finished), unless `allowImprove` is on:
+ * then they may fill in a better number later (another round of darts), and only their best
+ * counts. Each entry scores what it adds to their best so far (a lower one scores 0), so the
+ * points of all their attempts add up to their best. Going over the maximum still costs the
+ * penalty and closes it for them (their best stays).
+ *
+ * Once closed, the host can show the task on the big screen with how many reported a score
+ * and the spread of the numbers (`presentation`): no names, so no ranking.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -19,6 +26,8 @@ interface Config {
   prompt: string;
   maxPoints: number;
   penalty: number;
+  /** Players may fill in a better score later; only the best counts (absent before 1.2: off). */
+  allowImprove?: boolean;
 }
 
 interface Entry {
@@ -47,6 +56,8 @@ interface Evaluation {
   value: number;
   over: boolean;
   points: number;
+  /** The player's best valid number before this entry, when they had one (improving). */
+  previousBest?: number | null;
 }
 
 const MAX_VALUE = 1e9;
@@ -63,9 +74,21 @@ function entriesOf(state: State, playerId: string): Entry[] {
   return state.entries[playerId] ?? [];
 }
 
-/** The player's valid number, once they filled one in. */
+/** The player's valid number (their best, when improving is allowed), once they filled one in. */
 function acceptedOf(state: State, playerId: string): Entry | undefined {
-  return entriesOf(state, playerId).find((e) => !e.over);
+  let best: Entry | undefined;
+  for (const e of entriesOf(state, playerId)) if (!e.over && (!best || e.value > best.value)) best = e;
+  return best;
+}
+
+function improving(config: Config): boolean {
+  return config.allowImprove === true;
+}
+
+/** Best valid number among the given entries, or null. */
+function bestOf(entries: Entry[]): number | null {
+  const valid = entries.filter((e) => !e.over).map((e) => e.value);
+  return valid.length ? Math.max(...valid) : null;
 }
 
 function oversOf(state: State, playerId: string): number {
@@ -78,13 +101,16 @@ function deductedOf(state: State, playerId: string): number {
 
 /** Closed for this player: they went over the maximum and the host has not reopened it. */
 function isClosed(state: State, playerId: string): boolean {
-  return !acceptedOf(state, playerId) && oversOf(state, playerId) > (state.reopened?.[playerId] ?? 0);
+  // Without improving, a valid number means done anyway (and an over can only come before it).
+  if (!improving(state.config) && acceptedOf(state, playerId)) return false;
+  return oversOf(state, playerId) > (state.reopened?.[playerId] ?? 0);
 }
 
 /** The message after an entry above the maximum. */
-export function overMessage(config: Config, value: number): string {
+export function overMessage(config: Config, value: number, best: number | null = null): string {
   const cost = config.penalty > 0 ? ` ${plural(config.penalty, 'point')} ${config.penalty === 1 ? 'has' : 'have'} been deducted from your total, and this` : ' This';
-  return `${value} is more than the maximum of ${config.maxPoints}.${cost} challenge is now closed for you.`;
+  const kept = best !== null ? ` Your best score of ${best} still counts.` : '';
+  return `${value} is more than the maximum of ${config.maxPoints}.${cost} challenge is now closed for you.${kept}`;
 }
 
 export default defineModule<Config, State, Input, Evaluation>({
@@ -97,8 +123,10 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   canStart(state, player) {
     const accepted = acceptedOf(state, player.id);
-    if (accepted) return { ok: false, reason: `Your score: ${accepted.value}`, finished: true };
-    if (isClosed(state, player.id)) return { ok: false, reason: 'Closed for you', finished: true };
+    if (isClosed(state, player.id)) return { ok: false, reason: accepted ? `Your score: ${accepted.value} · closed for you` : 'Closed for you', finished: true };
+    if (accepted && !improving(state.config)) return { ok: false, reason: `Your score: ${accepted.value}`, finished: true };
+    if (accepted && accepted.value >= state.config.maxPoints) return { ok: false, reason: `Your score: ${accepted.value} (the maximum)`, finished: true };
+    if (accepted) return { ok: true, hint: `Your score: ${accepted.value} · improve it any time` };
     return { ok: true, hint: 'Fill in your score' };
   },
 
@@ -132,9 +160,13 @@ export default defineModule<Config, State, Input, Evaluation>({
     const entries = entriesOf(state, player.id);
     const last = entries.at(-1);
     if (!last) return null;
-    if (last.over) return isClosed(state, player.id) ? { text: overMessage(state.config, last.value), tone: 'danger' } : 'Open again: fill in your score';
+    const best = acceptedOf(state, player.id)?.value ?? null;
+    if (last.over) return isClosed(state, player.id) ? { text: overMessage(state.config, last.value, best), tone: 'danger' } : 'Open again: fill in your score';
     const deducted = deductedOf(state, player.id);
-    return { text: `Your score: ${last.value}${deducted > 0 ? ` (−${deducted} for going over the maximum)` : ''}`, tone: 'success' };
+    const penalty = deducted > 0 ? ` (−${deducted} for going over the maximum)` : '';
+    // Improving: a lower number than before does not count, the best does.
+    if (best !== null && best > last.value) return { text: `${last.value} does not beat your best: ${best} still counts${penalty}`, tone: 'warning' };
+    return { text: `Your score: ${last.value}${penalty}`, tone: 'success' };
   },
 
   evaluate(state, submissions, ctx) {
@@ -142,16 +174,31 @@ export default defineModule<Config, State, Input, Evaluation>({
     const s = submissions[0]!;
     const value = Number(s.payload.value);
     const over = value > state.config.maxPoints;
-    return { playerId: s.playerId, displayName: nameOf(ctx.players(), s.playerId), value, over, points: over ? 0 - state.config.penalty : value };
+    // The entry this submission added is the player's latest; what counts is what it adds to their best before it.
+    const entries = entriesOf(state, s.playerId);
+    const before = entries.length && entries.at(-1)!.value === value ? entries.slice(0, -1) : entries;
+    const previousBest = bestOf(before);
+    const gain = previousBest === null ? value : Math.max(0, value - previousBest);
+    return { playerId: s.playerId, displayName: nameOf(ctx.players(), s.playerId), value, over, points: over ? 0 - state.config.penalty : gain, previousBest };
   },
 
   calculateScores(state, evaluation) {
-    const reason = evaluation.over ? `${evaluation.value} is above the maximum of ${state.config.maxPoints}` : 'Reported score';
+    const before = evaluation.previousBest ?? null;
+    const reason = evaluation.over
+      ? `${evaluation.value} is above the maximum of ${state.config.maxPoints}`
+      : before === null
+        ? 'Reported score'
+        : evaluation.value > before
+          ? `Improved from ${before} to ${evaluation.value}`
+          : `${evaluation.value} does not beat ${before}`;
     return [{ playerId: evaluation.playerId, points: evaluation.points, reason }];
   },
 
   getStatistics(_state, evaluations) {
-    const valid = evaluations.filter((e) => !e.over);
+    // One number per player: their best.
+    const best = new Map<string, Evaluation>();
+    for (const e of evaluations) if (!e.over && (!best.has(e.playerId) || e.value > best.get(e.playerId)!.value)) best.set(e.playerId, e);
+    const valid = [...best.values()];
     const over = evaluations.filter((e) => e.over);
     return {
       reported: valid.length,
@@ -167,7 +214,9 @@ export default defineModule<Config, State, Input, Evaluation>({
     return ui.stack(
       [
         ui.text(c.prompt),
-        ui.caption(`The number you fill in is added to your total as points, up to ${c.maxPoints}.`),
+        ui.caption(
+          `The number you fill in is added to your total as points, up to ${c.maxPoints}.${improving(c) ? ' You can fill in a better one later: only your best counts.' : ''}`,
+        ),
       ],
       { gap: 'sm' },
     );
@@ -175,10 +224,12 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   guestView(state, player) {
     const c = state.config;
+    const best = acceptedOf(state, player.id)?.value ?? null;
     const children: UINode[] = [ui.subtitle(c.prompt)];
-    children.push(ui.numberInput('value', { label: 'Your points', min: 0, step: 1, placeholder: '0' }));
+    if (best !== null) children.push(ui.card([ui.text(`Your score now: ${best}. Fill in a higher one to improve it; only your best counts.`)], 'primary'));
+    children.push(ui.numberInput('value', { label: best !== null ? 'Your new score' : 'Your points', min: 0, step: 1, placeholder: '0' }));
     children.push(ui.caption(`Maximum ${c.maxPoints}.`));
-    children.push(ui.submit('Lock in my score', { size: 'lg' }));
+    children.push(ui.submit(best !== null ? 'Lock in my new score' : 'Lock in my score', { size: 'lg' }));
     // No word about the penalty: players find out when they go over.
     return { ui: ui.stack(children, { gap: 'md' }), canSubmit: true, status: `Up to ${c.maxPoints} points` };
   },
@@ -187,13 +238,42 @@ export default defineModule<Config, State, Input, Evaluation>({
     return ui.caption(state.config.prompt);
   },
 
+  presentation(state, evaluations): PresentationSlide[] {
+    // Every player's valid number (their best); entries above the maximum are not mentioned.
+    const values = new Map<string, number>();
+    for (const e of evaluations) if (!e.over && e.value >= (values.get(e.playerId) ?? -Infinity)) values.set(e.playerId, e.value);
+    if (!values.size) return [];
+    const numbers = [...values.values()];
+    const lowest = Math.min(...numbers);
+    const highest = Math.max(...numbers);
+    const average = Math.round((numbers.reduce((a, b) => a + b, 0) / numbers.length) * 10) / 10;
+    const spread =
+      numbers.length === 1 ? [ui.badge(`Reported: ${numbers[0]}`, 'primary')] : [ui.badge(`Lowest ${lowest}`), ui.badge(`Average ${average}`, 'primary'), ui.badge(`Highest ${highest}`)];
+    return [
+      {
+        steps: [
+          ui.stack(
+            [
+              ui.title(state.config.prompt, { align: 'center' }),
+              ui.display(String(numbers.length)),
+              ui.subtitle(`${numbers.length === 1 ? 'player' : 'players'} reported a score`, { align: 'center', tone: 'muted' }),
+              ui.row(spread, { gap: 'md', justify: 'center', wrap: true }),
+            ],
+            { gap: 'lg', align: 'center' },
+          ),
+        ],
+        stepSeconds: 10,
+      },
+    ];
+  },
+
   resultsView(state, evaluations) {
     const c = state.config;
     const rows = new Map<string, { name: string; value: number | null; deducted: number }>();
     for (const e of evaluations) {
       const row = rows.get(e.playerId) ?? { name: e.displayName, value: null, deducted: 0 };
       if (e.over) row.deducted -= e.points;
-      else row.value = e.value;
+      else row.value = Math.max(row.value ?? e.value, e.value);
       rows.set(e.playerId, row);
     }
     const total = (r: { value: number | null; deducted: number }) => (r.value ?? 0) - r.deducted;
@@ -210,7 +290,7 @@ export default defineModule<Config, State, Input, Evaluation>({
     );
     const overCount = evaluations.filter((e) => e.over).length;
     const badges = ui.row(
-      [ui.badge(`${evaluations.filter((e) => !e.over).length} reported`), ui.badge(`Maximum ${c.maxPoints}`), ...(overCount ? [ui.badge(`${overCount} over the maximum`, 'danger')] : [])],
+      [ui.badge(`${[...rows.values()].filter((r) => r.value !== null).length} reported`), ui.badge(`Maximum ${c.maxPoints}`), ...(overCount ? [ui.badge(`${overCount} over the maximum`, 'danger')] : [])],
       { gap: 'sm', wrap: true, justify: 'center' },
     );
     const shared = ui.stack(

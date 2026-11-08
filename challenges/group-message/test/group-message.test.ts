@@ -38,7 +38,7 @@ function contribute(state: ReturnType<typeof mod.createInstance>, ctx: InstanceC
 
 describe('group-message', () => {
   it('has a consistent manifest: automatic, immediate, repeated attempts', () => {
-    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.5.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'group-message', version: '1.6.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -55,7 +55,12 @@ describe('group-message', () => {
     const { ctx } = fakeCtx([ada, bea]);
     const state = mod.onPhaseChange!(mod.createInstance(config, ctx), 'ACTIVE', ctx);
     expect(mod.validateInput(state, ada, { words: 'happy birthday dear' }, ctx)).toEqual({ ok: true });
-    expect(mod.validateInput(state, ada, { words: 'happy birthday dear Sam' }, ctx)).toEqual({ ok: false, reason: 'Only 3 words per turn' });
+    expect(mod.validateInput(state, ada, { words: 'happy birthday dear Sam' }, ctx)).toEqual({ ok: false, reason: 'Only 3 words per turn (punctuation is free)' });
+    // Punctuation never counts as a word, on its own or stuck to one.
+    expect(mod.validateInput(state, ada, { words: 'happy, birthday - dear!' }, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, ada, { words: '. … ! ?' }, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, ada, { words: '"Happy" — birthday , 🎂 !' }, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, ada, { words: '"Happy" — birthday , 🎂 Sam !' }, ctx)).toMatchObject({ ok: false });
     expect(mod.validateInput(state, ada, { words: '   ' }, ctx)).toMatchObject({ ok: false });
     expect(mod.validateInput(state, ada, {} as never, ctx)).toMatchObject({ ok: false });
     expect(mod.validateInput(state, ada, { words: 'x'.repeat(31) }, ctx)).toEqual({ ok: false, reason: 'That word is too long' });

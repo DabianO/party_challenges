@@ -40,7 +40,7 @@ function answer(state: State, ctx: InstanceContext, who: PlayerRef, id: string, 
 
 describe('sliding-scales', () => {
   it('has a consistent manifest: a Hot Take scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'sliding-scales', version: '1.2.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
+    expect(mod.manifest).toMatchObject({ id: 'sliding-scales', version: '1.3.0', apiVersion: '2', results: 'onClose', suggestedCategory: 'Hot Takes' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -49,8 +49,10 @@ describe('sliding-scales', () => {
     let state = mod.createInstance(config, ctx);
     state = answer(state, ctx, ada, 's0', 12);
     const view = mod.guestView(state, ada, ctx);
-    expect(view.canSubmit).toBe(false);
-    expect(view.status).toBe('1 of 2 answered · change them any time');
+    // Optional lock-in: the button stays, Back keeps the answers open.
+    expect(view.canSubmit).toBe(true);
+    expect(view.status).toBe('1 of 2 answered · change them any time, or lock them in');
+    expect(JSON.stringify(view.ui)).toContain('Done: lock in my answers');
     const json = JSON.stringify(view.ui);
     expect(json).toContain('Maximum acceptable shower time');
     expect(json).toContain(JSON.stringify({ type: 'live-answer', action: 'answer', id: 's0', value: 12, min: 0, max: 60, step: 1, unit: 'minutes', marks: [{ value: 0, label: '0 minutes' }, { value: 60, label: '60 minutes' }] }));
@@ -74,7 +76,9 @@ describe('sliding-scales', () => {
     expect(answer(state, ctx, ada, 's0', 1.5)).toBe(state);
     expect(state.activity.s0).toBe(2);
     // Typing nothing to submit: answering is live only.
-    expect(mod.validateInput(state, ada, {}, ctx)).toMatchObject({ ok: false });
+    // Submitting only locks the answers in, once there is at least one.
+    expect(mod.validateInput(state, ada, {}, ctx)).toEqual({ ok: true });
+    expect(mod.validateInput(state, { id: 'nobody', displayName: 'Nobody', connected: true }, {}, ctx)).toEqual({ ok: false, reason: 'Answer at least one first' });
   });
 
   it('repairs scales that do not add up', () => {

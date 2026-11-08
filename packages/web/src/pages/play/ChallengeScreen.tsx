@@ -66,7 +66,8 @@ function Next({ ctx, entry, canContinue }: { ctx: PlayCtx; entry: BoardEntry; ca
       <BackBar ctx={ctx} title={entry.title} />
       {problem && entry.note ? (
         <div className={`card next-warning tone-${entry.noteTone}`} role="alert">
-          <p className="eyebrow">Not accepted</p>
+          {/* danger: the answer was refused; warning: it counted, but went wrong (e.g. a false start). */}
+          <p className="eyebrow">{entry.noteTone === 'danger' ? 'Not accepted' : 'Oops'}</p>
           <h2>{entry.note}</h2>
         </div>
       ) : (

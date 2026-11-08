@@ -33,8 +33,8 @@ Errors are JSON `{ "error": string, "code"?: string }` with status 400 (validati
 | `POST /api/games/:id/duplicate` | host | Start over: a new DRAFT game with this game's setup and no players or scores → `{ game, hostToken, warnings }`; the original is untouched |
 | `GET /api/games/:id/setup` | host | The game's configuration as a `GameSetup` JSON file (name, settings, branding, board with titles and options, referenced media as base64). No players or scores |
 | `GET /api/games/:id/export` | host | Full game document (secrets stripped) |
-| `POST /api/games/:id/challenges` | host | Add instance `{ moduleId, configuration, title?, category?, allowReplay?, availability?, assignedPlayerIds?, evaluationMode? }` |
-| `PATCH /api/games/:id/challenges/:instanceId` | host | Update `configuration` (only while nobody has played it: never opened, or reset; an open instance restarts from the new configuration) and/or instance options |
+| `POST /api/games/:id/challenges` | host | Add instance `{ moduleId, configuration, title?, category?, allowReplay?, inPresentation?, availability?, assignedPlayerIds?, evaluationMode? }` (`inPresentation`, default true: its slides are in the results presentation) |
+| `PATCH /api/games/:id/challenges/:instanceId` | host | Update `configuration` (only while nobody has played it: never opened, or reset; an open instance restarts from the new configuration) and/or instance options. Once the game is finished only `inPresentation` may still change |
 | `DELETE /api/games/:id/challenges/:instanceId` | host | Remove, any time before the game is closed; points already earned with it are reversed, as with a reset |
 | `POST /api/games/:id/challenges/reorder` | host | `{ order: string[] }` |
 | `GET /api/games/:id/challenges/:instanceId/results` | host | Shared results of an instance |
@@ -97,7 +97,7 @@ Every response carries a strict `Content-Security-Policy`, `X-Frame-Options: DEN
 | `clear-avatar` | `{ playerId }`: take a player's selfie off (they get their icon back) |
 | `show-spotlight` | `{ instanceId, itemId, hold? }`: put one spotlight item (e.g. a Hot Take) on the big screen now, for a minute or, with `hold`, until `release-spotlight` |
 | `release-spotlight` | Let the spotlight rotate again after a held item (the next one comes up at once) |
-| `start-presentation` | `{ instanceIds?, autoplay? }`: the results presentation on the big screen, with the slides (module `presentation`) of the given closed challenges, default all that have any, in board order. Also on a finished game |
+| `start-presentation` | `{ instanceIds?, autoplay? }`: the results presentation on the big screen, with the slides (module `presentation`) of the given closed challenges, default all that have any and are `inPresentation` (the setup's choice), in board order. Also on a finished game |
 | `move-presentation` | `{ to }`: `next` / `previous` (a step; at a slide's end, the next slide), `next-slide` / `previous-slide`, or `{ instanceId, slide? }` |
 | `autoplay-presentation` | `{ on }`: play by itself (each step for its `stepSeconds`, stopping on the last one; from the end it starts over) or hold |
 | `stop-presentation` | Back to the normal big screen |

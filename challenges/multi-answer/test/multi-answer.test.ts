@@ -46,7 +46,7 @@ const sub = (playerId: string, answers: (string | number)[]): Submission<Record<
 
 describe('multi-answer', () => {
   it('has a consistent manifest', () => {
-    expect(mod.manifest).toMatchObject({ id: 'multi-answer', version: '1.1.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'multi-answer', version: '1.2.0', apiVersion: '2', results: 'immediate', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -153,5 +153,47 @@ describe('multi-answer', () => {
     expect(matches({ answer: 'Paris', tolerance: 3 }, 'Pari')).toBe(false);
     expect(numericBox({ ...capitals, answers: [{ answer: 'Paris' }, { answer: '1889' }] }, 1)).toBe(true);
     expect(numericBox({ ...capitals, anyOrder: true, answers: [{ answer: 'Paris' }, { answer: '1889' }] }, 1)).toBe(false);
+  });
+
+  it('presents several answers hidden, then revealed with how many got each, without names or points', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(capitals, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const evaluations = [mod.evaluate(state, [sub('p1', ['paris', 'Brussel', 'washington dc'])], ctx), mod.evaluate(state, [sub('p2', ['Paris', 'Antwerp'])], ctx)];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]!.steps).toHaveLength(2);
+    const [ask, reveal] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(ask).toContain('Name the capitals');
+    expect(ask).toContain('Belgium');
+    expect(ask).not.toContain('Brussels');
+    expect(reveal).toContain('Brussels');
+    expect(reveal).toContain('2 of 2 right');
+    expect(reveal).toContain('1 of 2 got all 3');
+    const all = JSON.stringify(slides);
+    for (const p of players) expect(all).not.toContain(p.displayName);
+    expect(all).not.toMatch(/point|ranking/i);
+  });
+
+  it('presents a single answer as the room’s most common answers, the right ones lit up on reveal', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance({ question: 'Who painted the Night Watch?', answers: [{ answer: 'Rembrandt', alternatives: 'Rembrandt van Rijn' }], anyOrder: false, timeLimit: 30, points: 5 }, ctx);
+    const given = ['rembrandt', 'Vermeer', 'Rembrandt van Rijn', 'vermeer', 'Van Gogh', 'Hals', 'Steen', 'Dou', 'Bol', ''];
+    const evaluations = given.map((g, i) => mod.evaluate(state, [{ ...sub('p1', [g]), id: `s${i}` }], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    const [ask, reveal] = slides[0]!.steps.map((s) => s as unknown as { children: { type: string; bars?: { label: string; value: number; highlight?: boolean }[] }[] });
+    const bars = (step: typeof ask) => step!.children.find((n) => n.type === 'bar-chart')!.bars!;
+    expect(bars(ask).map((b) => [b.label, b.value])).toEqual([
+      ['Rembrandt', 2],
+      ['Vermeer', 2],
+      ['Van Gogh', 1],
+      ['Hals', 1],
+      ['Steen', 1],
+      ['Something else', 2],
+    ]);
+    expect(bars(ask).some((b) => b.highlight)).toBe(false);
+    expect(bars(reveal).filter((b) => b.highlight).map((b) => b.label)).toEqual(['Rembrandt']);
+    expect(JSON.stringify(reveal)).toContain('2 of 10 right');
+    expect(JSON.stringify(slides)).not.toMatch(/point/i);
   });
 });

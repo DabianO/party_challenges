@@ -129,8 +129,9 @@ export default defineModule<Config, State, unknown, Evaluation>({
   },
 
   // Answers are live actions; there is nothing to submit.
-  validateInput() {
-    return { ok: false, reason: 'Move the sliders to answer' };
+  // Answers are live actions; submitting only locks them in for good (Back keeps them open).
+  validateInput(state, player) {
+    return answeredBy(state, player.id) > 0 ? { ok: true } : { ok: false, reason: 'Answer at least one first' };
   },
 
   handleInput(state) {
@@ -213,11 +214,14 @@ export default defineModule<Config, State, unknown, Evaluation>({
               }),
             ]),
           ),
+          // Optional: going back keeps everything open to change later.
+          ui.submit('✓ Done: lock in my answers', { tone: 'neutral', disabled: answered === 0 }),
+          ui.caption('Or just go back: your answers are kept, and you can change them until the challenge closes.', { align: 'center' }),
         ],
         { gap: 'md', align: 'stretch' },
       ),
-      canSubmit: false,
-      status: `${answered} of ${statements.length} answered · change them any time`,
+      canSubmit: true,
+      status: `${answered} of ${statements.length} answered · change them any time, or lock them in`,
     };
   },
 

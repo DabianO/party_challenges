@@ -120,6 +120,8 @@ export interface PersistedInstance {
   category: string;
   /** Players may start new attempts; only their best one counts. */
   allowReplay: boolean;
+  /** Part of the results presentation by default (absent in older documents: true). */
+  inPresentation: boolean;
   configuration: Record<string, unknown>;
   moduleState: unknown;
   phase: ChallengePhase;

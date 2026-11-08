@@ -58,7 +58,7 @@ function play(state: State, ctx: InstanceContext, who: PlayerRef, succeeded: boo
 
 describe('secret-word', () => {
   it('has a consistent manifest: automatic, immediate, one word per attempt', () => {
-    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.4.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
+    expect(mod.manifest).toMatchObject({ id: 'secret-word', version: '1.5.0', category: 'creativity', apiVersion: '2', results: 'immediate', attempts: 'repeat', resubmission: 'none' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
@@ -220,6 +220,44 @@ describe('secret-word', () => {
     expect(mine).toContain('1 of 2');
     expect(mine).toContain('pineapple');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('Nobody has answered yet');
+  });
+});
+
+describe('secret-word presentation', () => {
+  it('counts the words, then shows the ones that slipped by (with Dutch): no names, points or spotted words', () => {
+    const { ctx } = fakeCtx([ada, bea]);
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const evaluations = [
+      mod.evaluate(state, [sub('p1', 'pineapple', true)], ctx),
+      mod.evaluate(state, [sub('p1', 'volcano', false)], ctx),
+      mod.evaluate(state, [sub('p2', 'submarine', true)], ctx),
+      mod.evaluate(state, [sub('p2', 'lighthouse', true)], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Secret words', 'Slipped by unnoticed']);
+    const [played, slipped] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(played).toContain('"text":"4"');
+    expect(played).toContain('by 2 players');
+    expect(slipped).toContain('"text":"3 of 4"');
+    expect(slipped).toContain('1 spotted');
+    const words = JSON.stringify(slides[1]);
+    // Alphabetical, so the order gives nothing away.
+    expect(words).toMatch(/"lighthouse".*"\(vuurtoren\)".*"pineapple".*"submarine".*"\(onderzeeër\)"/);
+    const all = JSON.stringify(slides);
+    expect(all).not.toMatch(/Ada|Bea|volcano|points|ranking/);
+  });
+
+  it('splits many words over several slides, and never shows a word still in someone’s hand', () => {
+    const { ctx } = fakeCtx([ada, bea]);
+    let state = mod.createInstance({ maxPoints: 100, pointsPerWord: 1 }, ctx);
+    state = mod.onAttemptStart!(state, bea, ctx);
+    const pending = state.players.p2!.current!;
+    const evaluations = Array.from({ length: 30 }, (_, i) => mod.evaluate(state, [sub('p1', `word${String(i).padStart(2, '0')}`, true)], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Secret words', 'Slipped by unnoticed · 1 of 2', 'Slipped by unnoticed · 2 of 2']);
+    expect((slides[1]!.steps[0] as { children: unknown[] }).children).toHaveLength(24);
+    expect(JSON.stringify(slides)).not.toContain(`"${pending}"`);
   });
 });
 

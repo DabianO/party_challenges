@@ -53,7 +53,7 @@ const submission = (playerId: string, photo: unknown, judgements: Judgement[] = 
 describe('photo-hunt', () => {
   it('has a consistent v2 manifest with image evidence', () => {
     expect(mod.manifest.id).toBe('photo-hunt');
-    expect(mod.manifest.version).toBe('1.2.0');
+    expect(mod.manifest.version).toBe('1.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.category).toBe('chaos');
     expect(mod.manifest.results).toBe('immediate');
@@ -186,5 +186,40 @@ describe('photo-hunt', () => {
     expect(bob).toContain('That is orange');
     expect(JSON.stringify(results.guestUi!(players[2]!))).toContain('The host gave you 9 points');
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('No approved photos yet.');
+  });
+});
+
+describe('photo-hunt presentation', () => {
+  it('shows the task with every approved photo and who took it, without points or verdicts', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    const evaluations = [
+      mod.evaluate(state, [submission('p1', 'media://a1', [judgement('approve')])], ctx),
+      mod.evaluate(state, [submission('p2', 'media://b1', [judgement('reject', 'peer', { note: 'That is orange' })])], ctx),
+      mod.evaluate(state, [submission('p3', 'media://c1', [judgement('approve', 'host', { points: 9 })])], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const shown = JSON.stringify(slides);
+    expect(shown).toContain(config.task);
+    expect(shown).toContain('"type":"grid","columns":2');
+    expect(shown).toContain('media://a1');
+    expect(shown).toContain('media://c1');
+    expect(shown).toContain('Alice');
+    expect(shown).toContain('Cara');
+    expect(shown).not.toContain('media://b1');
+    expect(shown).not.toContain('Bob');
+    expect(shown).not.toMatch(/orange|reject|approved|points/i);
+  });
+
+  it('puts six photos on a slide in three columns', () => {
+    const { ctx } = fakeCtx();
+    const state = mod.createInstance(config, ctx);
+    const evaluations = Array.from({ length: 7 }, (_, i) => mod.evaluate(state, [submission(`p${(i % 3) + 1}`, `media://x${i}`, [judgement('approve')])], ctx));
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides.map((s) => s.caption)).toEqual(['Photos 1–6 of 7', 'Photos 7–7 of 7']);
+    expect(JSON.stringify(slides[0])).toContain('"type":"grid","columns":3');
+    expect(JSON.stringify(slides[1])).toContain('"type":"grid","columns":1');
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
   });
 });

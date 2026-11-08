@@ -56,7 +56,7 @@ describe('board lifecycle', () => {
     expect(() => game.addChallenge('closest-number', { question: 'x' })).toThrow(/Invalid configuration/);
     const inst = game.addChallenge('closest-number', CLOSEST);
     expect(inst.availability).toBe('open');
-    expect(inst.moduleVersion).toBe('2.1.0');
+    expect(inst.moduleVersion).toBe('2.2.0');
 
     game.performHostAction({ action: 'open-lobby' });
     const alice = game.join('Alice').player;

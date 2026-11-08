@@ -244,7 +244,12 @@ evaluated → scored.
    shrinks a slide that does not fit, so one slide may hold many items (`ui.grid`). Examples:
    `fill-in-the-blanks` (spool), `selfiemotion` (four per slide), `group-message` (the
    message in readable parts), `blob-war` (the closing picture), the Hot Takes modules (every
-   statement on one slide). Return `[]` when there is nothing to show.
+   statement on one slide), the quiz modules (`multiple-choice`, `numeric-answer`: the room's
+   answers first, the right answer revealed in a second step with the same layout), photos
+   and captions (`photo-hunt`, `caption-this`). Every built-in module has slides: give a new
+   module some too, since hosts expect every challenge to be presentable. Which challenges are
+   in it is the host's choice (`inPresentation`), not the module's. Return `[]` when there is
+   nothing to show.
 1h. **`onPlayerJoin(state, player, ctx)`** (optional) runs for every ACTIVE instance when a
    new player joins the game, before they start anything, e.g. to give them a place on a
    shared field right away.

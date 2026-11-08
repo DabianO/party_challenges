@@ -6,7 +6,7 @@
  * they can. Reaction time is measured from server timestamps only (SR-5) and scored on
  * an absolute scale, since players do not race each other any more.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerNote, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -87,6 +87,30 @@ function penaltyOf(config: Config): number {
 
 const INSTRUCTION = 'Tap as fast as you can when the screen turns green';
 
+/** What a false start costs, in words: "3 points are deducted" or "it scores 0 points". */
+function falseStartCost(config: Config): string {
+  const penalty = penaltyOf(config);
+  return penalty > 0 ? `${penalty} ${penalty === 1 ? 'point is' : 'points are'} deducted` : 'it scores 0 points';
+}
+
+/** "False start! 3 points deducted" (or "… 0 points"). */
+function falseStartNote(config: Config): string {
+  const penalty = penaltyOf(config);
+  return penalty > 0 ? `False start! ${penalty} ${penalty === 1 ? 'point' : 'points'} deducted` : 'False start! 0 points';
+}
+
+/** Reaction-time ranges for the presentation's chart, in ms. */
+const BUCKETS: [number, number][] = [
+  [0, 200],
+  [200, 250],
+  [250, 300],
+  [300, 350],
+  [350, 400],
+  [400, 500],
+  [500, 750],
+  [750, Infinity],
+];
+
 export default defineModule<Config, State, Input, Evaluation>({
   manifest: manifestJson as unknown as Manifest,
   configurationSchema: schemaJson,
@@ -148,11 +172,13 @@ export default defineModule<Config, State, Input, Evaluation>({
     return { ...state, last: { ...(state.last ?? {}), [player.id]: 'missed' } };
   },
 
-  playerNote(state, player) {
+  playerNote(state, player): string | PlayerNote | null {
     const last = state.last?.[player.id];
     if (last === undefined) return null;
+    // Said out loud in the lock-in message: what the false start cost.
     const best = state.best?.[player.id];
-    const lastText = last === 'false-start' ? 'False start' : last === 'missed' ? 'Too late' : ms(last);
+    if (last === 'false-start') return { text: best === undefined ? falseStartNote(state.config) : `${falseStartNote(state.config)} · best ${ms(best)}`, tone: 'warning' };
+    const lastText = last === 'missed' ? 'Too late' : ms(last);
     return best === undefined ? lastText : `${lastText} · best ${ms(best)}`;
   },
 
@@ -207,8 +233,9 @@ export default defineModule<Config, State, Input, Evaluation>({
       [
         ui.text(`${INSTRUCTION}. The wait is random, so keep your eyes on the screen.`),
         ui.caption(
-          `${c.maxPoints} points for a lightning-fast tap, fewer the slower you are, 0 from ${ms(c.zeroPointsMs ?? ZERO_POINTS_MS)}. Tapping before green is a false start${penalty > 0 ? ` (-${penalty} points)` : ''}.`,
+          `${c.maxPoints} points for a lightning-fast tap, fewer the slower you are, 0 from ${ms(c.zeroPointsMs ?? ZERO_POINTS_MS)}.`,
         ),
+        ui.text(`⚠️ Tapping before green is a false start: ${falseStartCost(c)}${penalty > 0 ? '!' : '.'}`, { tone: penalty > 0 ? 'danger' : 'warning' }),
       ],
       { gap: 'sm' },
     );
@@ -219,19 +246,53 @@ export default defineModule<Config, State, Input, Evaluation>({
     const goAt = state.goAt[player.id];
     if (mine) {
       const node: UINode = mine.falseStart
-        ? ui.card([ui.display('False start!'), ui.caption('You tapped before GO', { align: 'center' })], 'danger')
+        ? ui.card([ui.display('False start!'), ui.caption(`You tapped before GO: ${falseStartCost(state.config)}`, { align: 'center' })], 'danger')
         : ui.card([ui.display(goAt === undefined ? 'Tapped' : ms(mine.tappedAt - goAt)), ui.caption('Your reaction time', { align: 'center' })], 'primary');
       return { ui: node, canSubmit: false, status: mine.falseStart ? 'False start' : 'Tapped!' };
     }
     const waiting = goAt === undefined;
     const button = ui.submit('TAP', { payload: { tap: true }, size: 'huge', tone: waiting ? 'danger' : 'success' });
     // Before GO: no timer and nothing that hints at when GO will come.
-    const card = waiting ? ui.card([ui.display('Wait…')], 'danger') : ui.card([ui.display('TAP NOW!'), ui.timer('lock', { size: 'sm' })], 'success');
+    const card = waiting
+      ? ui.card([ui.display('Wait…'), ui.caption(`Not yet! Tapping before green is a false start: ${falseStartCost(state.config)}.`, { align: 'center' })], 'danger')
+      : ui.card([ui.display('TAP NOW!'), ui.timer('lock', { size: 'sm' })], 'success');
     return { ui: ui.stack([card, button], { gap: 'lg', align: 'stretch' }), canSubmit: true, status: waiting ? 'Wait for green…' : 'GO!' };
   },
 
-  mainView() {
-    return ui.caption(`${INSTRUCTION}. Tapping too early is a false start!`);
+  mainView(state) {
+    return ui.caption(`${INSTRUCTION}. Tapping too early is a false start: ${falseStartCost(state.config)}!`);
+  },
+
+  presentation(_state, evaluations): PresentationSlide[] {
+    // How quick the room was: reaction times in ranges, no names (best attempt per player).
+    const best = new Map<string, Evaluation>();
+    for (const e of evaluations) {
+      const had = best.get(e.playerId);
+      if (!had || (e.reactionMs !== null && (had.reactionMs === null || e.reactionMs < had.reactionMs))) best.set(e.playerId, e);
+    }
+    const all = [...best.values()];
+    if (all.length === 0) return [];
+    const times = all.filter((e) => e.reactionMs !== null).map((e) => e.reactionMs as number).sort((a, b) => a - b);
+    const falseStarts = all.length - times.length;
+    const label = ([lo, hi]: [number, number]) => (hi === Infinity ? `${lo}+ ms` : lo === 0 ? `< ${hi} ms` : `${lo}–${hi} ms`);
+    const bars = BUCKETS.map((b) => ({ label: label(b), value: times.filter((t) => t >= b[0] && t < b[1]).length, tone: 'primary' as const })).filter(
+      (bar, i, list) => bar.value > 0 || list.slice(0, i).some((x) => x.value > 0) && list.slice(i + 1).some((x) => x.value > 0),
+    );
+    const mid = Math.floor(times.length / 2);
+    const median = times.length ? (times.length % 2 ? times[mid]! : (times[mid - 1]! + times[mid]!) / 2) : null;
+    const facts = ui.row(
+      [
+        ...(times.length ? [ui.badge(`Quickest ${ms(times[0]!)}`, 'success'), ui.badge(`Median ${ms(median!)}`)] : []),
+        ui.badge(`${falseStarts} false start${falseStarts === 1 ? '' : 's'}`, falseStarts ? 'danger' : 'neutral'),
+      ],
+      { gap: 'sm', wrap: true, justify: 'center' },
+    );
+    return [
+      {
+        caption: 'Reaction times',
+        steps: [ui.stack([...(bars.length ? [ui.barChart(bars)] : [ui.display('Nobody waited for green!', { align: 'center' })]), facts], { gap: 'md', align: 'stretch' })],
+      },
+    ];
   },
 
   resultsView(state, evaluations) {

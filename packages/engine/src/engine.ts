@@ -115,6 +115,7 @@ export class Engine {
           availability: c.availability,
           evaluationMode: c.evaluationMode ?? null,
           allowReplay: c.allowReplay === true,
+          inPresentation: c.inPresentation !== false,
         };
         try {
           runtime.addChallenge(c.moduleId, c.configuration, options);

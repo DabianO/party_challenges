@@ -5,7 +5,7 @@
  * picks one of up to six lettered options. The submission is evaluated on its own as
  * soon as the attempt locks; the speed bonus uses the server-side attempt timestamps.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -199,6 +199,40 @@ export default defineModule<Config, State, Input, Evaluation>({
   mainView(state) {
     // Public card: the question only, never which option is right.
     return ui.caption(state.config.question);
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    // Step 1: the question and how the room answered; step 2: the same, with the right answer lit up.
+    // Aggregates only: no names, points or speeds.
+    const c = state.config;
+    if (evaluations.length === 0 || c.options.length === 0) return [];
+    const correctId = correctIdOf(c);
+    const ids = optionIds(c);
+    const counts: Record<string, number> = {};
+    for (const id of ids) counts[id] = 0;
+    for (const e of evaluations) if (e.answer in counts) counts[e.answer] = (counts[e.answer] ?? 0) + 1;
+    const total = evaluations.length;
+    const correctCount = evaluations.filter((e) => e.correct).length;
+    const step = (reveal: boolean): UINode => {
+      const chart = ui.barChart(
+        ids.map((id) => {
+          const lit = reveal && id === correctId;
+          return { label: optionLabel(c, id), value: counts[id] ?? 0, highlight: lit, tone: lit ? ('success' as const) : ('neutral' as const) };
+        }),
+        { percent: true },
+      );
+      const body = c.media ? ui.grid(2, [ui.image(ctx.mediaUrl(c.media), { maxHeight: '45vh' }), chart], { gap: 'lg' }) : chart;
+      return ui.stack(
+        [
+          ui.title(c.question, { align: 'center' }),
+          body,
+          ...(correctId === null ? [] : [reveal ? ui.display(optionLabel(c, correctId), { tone: 'success' }) : ui.display('?', { tone: 'muted' })]),
+          ui.caption(reveal ? `${correctCount} of ${total} right` : `${total} ${total === 1 ? 'answer' : 'answers'}`, { align: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      );
+    };
+    return [{ steps: correctId === null ? [step(false)] : [step(false), step(true)], stepSeconds: 10 }];
   },
 
   resultsView(state, evaluations) {

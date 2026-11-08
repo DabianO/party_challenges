@@ -1,7 +1,7 @@
 {
   "id": "secret-word",
   "name": "Secret Word",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "apiVersion": "2",
   "category": "creativity",
   "description": "Get a secret word and slip it into a conversation without the other person noticing. Then say honestly whether it worked, and get your next word.",

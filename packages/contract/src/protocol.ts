@@ -135,6 +135,8 @@ export interface ChallengeInstanceSummary {
   availability: Availability;
   /** Players may start it again; only their best attempt counts. */
   allowReplay: boolean;
+  /** Its results are part of the results presentation (unless the host leaves it out when starting it). */
+  inPresentation: boolean;
   /** Host only (and the assignees themselves see the instance in their board). */
   assignedPlayerIds?: string[];
   stats: ChallengeStats;
@@ -586,6 +588,8 @@ export interface InstanceOptions {
   evaluationMode: EvaluationMode | null;
   /** Players may play it again to improve; their best attempt counts (immediate-results modules only). */
   allowReplay: boolean;
+  /** Show its results in the results presentation (default true). */
+  inPresentation: boolean;
 }
 
 export type PresentationMove = 'next' | 'previous' | 'next-slide' | 'previous-slide' | { instanceId: string; slide?: number };

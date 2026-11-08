@@ -12,7 +12,7 @@
  * words in the same order. The server also checks the whole try took no longer than the
  * rounds allow (a phone cannot pause the clock by going to the background).
  */
-import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type QuickRound, type UINode } from '@challenge/contract';
+import { defineModule, ui, type InstanceContext, type Manifest, type PlayerRef, type PresentationSlide, type QuickRound, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -385,6 +385,62 @@ export default defineModule<Config, State, Input, Evaluation>({
 
   mainView() {
     return ui.caption('Tap the colour of the letters, not the word!');
+  },
+
+  presentation(state, evaluations): PresentationSlide[] {
+    // The room's taps added up (each player's counted try), then which levels they played.
+    // Aggregates only: no names, points or times of single players.
+    if (evaluations.length === 0) return [];
+    const counted = evaluations.filter((e) => !e.tooSlow);
+    const sum = (f: (e: Evaluation) => number) => counted.reduce((n, e) => n + f(e), 0);
+    const correct = sum((e) => e.correct);
+    const words = sum((e) => e.rounds);
+    const perfect = counted.filter((e) => e.correct === e.rounds).length;
+    const timed = counted.filter((e) => e.avgMs !== null);
+    const avgMs = timed.length ? Math.round(timed.reduce((n, e) => n + e.avgMs! * e.correct, 0) / Math.max(1, timed.reduce((n, e) => n + e.correct, 0))) : null;
+    const badges = ui.row(
+      [ui.badge(plural(evaluations.length, 'player')), ui.badge(`${perfect} perfect ${perfect === 1 ? 'try' : 'tries'}`, perfect ? 'success' : 'muted')],
+      { gap: 'sm', wrap: true, justify: 'center' },
+    );
+    const head = ui.stack([ui.display(String(words)), ui.subtitle('colour words in the counted tries', { align: 'center' })], { gap: 'sm', align: 'center' });
+    const taps = ui.barChart(
+      [
+        { label: 'Right colour', value: correct, tone: 'success' },
+        { label: 'Fell for the word', value: sum((e) => e.wrong), tone: 'danger' },
+        { label: 'Too late', value: sum((e) => e.missed), tone: 'warning' },
+      ],
+      { percent: true },
+    );
+    const average = ui.caption(
+      counted.length
+        ? `On average ${Math.round((correct / counted.length) * 10) / 10} of ${state.config.rounds} right${avgMs === null ? '' : ` · ${secs(avgMs)} per correct tap`}`
+        : 'No try counted',
+      { align: 'center' },
+    );
+    const slides: PresentationSlide[] = [
+      {
+        caption: 'Tap the colour, not the word',
+        steps: [ui.stack([head, badges], { gap: 'lg', align: 'center' }), ui.stack([head, taps, average], { gap: 'lg', align: 'stretch' })],
+        stepSeconds: 8,
+      },
+    ];
+    const levels = levelsOf(state.config);
+    if (counted.length > 0 && levels.length > 1) {
+      slides.push({
+        caption: 'Levels played',
+        steps: [
+          ui.stack(
+            [
+              ui.barChart(levels.map((l, i) => ({ label: `Level ${i + 1} · ${plural(l.colors, 'colour')}`, value: counted.filter((e) => (e.level ?? 1) === i + 1).length })), { percent: true }),
+              ui.caption('The level of every player’s counted try', { align: 'center' }),
+            ],
+            { gap: 'md', align: 'stretch' },
+          ),
+        ],
+        stepSeconds: 8,
+      });
+    }
+    return slides;
   },
 
   resultsView(_state, evaluations) {

@@ -43,7 +43,7 @@ const sub = (playerId: string, startedAt: number, submittedAt: number): Submissi
 describe('timed-reaction', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('timed-reaction');
-    expect(mod.manifest.version).toBe('2.3.0');
+    expect(mod.manifest.version).toBe('2.4.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -118,8 +118,40 @@ describe('timed-reaction', () => {
     // A tap before GO is a false start; the best time stays.
     state = mod.onAttemptStart!(state, alice, ctx);
     state = mod.handleInput(state, alice, { tap: true }, ctx);
-    expect(mod.playerNote!(state, alice, ctx)).toBe('False start · best 312 ms');
+    // …and the lock-in message says what it cost (a warning, not "Locked in ✓").
+    expect(mod.playerNote!(state, alice, ctx)).toEqual({ text: 'False start! 0 points · best 312 ms', tone: 'warning' });
     expect(mod.playerNote!(state, players[1]!, ctx)).toBeNull();
+    const penalised = { ...state, config: { ...state.config, falseStartPenalty: 3 } };
+    expect(mod.playerNote!(penalised, alice, ctx)).toEqual({ text: 'False start! 3 points deducted · best 312 ms', tone: 'warning' });
+    const bob = players[1]!;
+    const waiting = mod.onAttemptStart!(penalised, bob, ctx);
+    expect(JSON.stringify(mod.guestView(waiting, bob, ctx).ui)).toContain('Tapping before green is a false start: 3 points are deducted');
+    expect(JSON.stringify(mod.introView!(penalised, bob, ctx))).toContain('3 points are deducted');
+  });
+
+  it('presents the room’s reaction times in ranges, without names or points', () => {
+    const { ctx } = fakeCtx([0]);
+    const state = mod.createInstance(config, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const ev = (playerId: string, reactionMs: number | null) => ({ playerId, displayName: `Name ${playerId}`, reactionMs, falseStart: reactionMs === null, points: 7 });
+    // p1 played twice: only the best counts.
+    const slides = mod.presentation!(state, [ev('p1', 480), ev('p1', 230), ev('p2', 260), ev('p3', 610), ev('p4', null)], ctx);
+    expect(slides).toHaveLength(1);
+    const json = JSON.stringify(slides);
+    expect(json).toContain('Quickest 230 ms');
+    expect(json).toContain('Median 260 ms');
+    expect(json).toContain('1 false start');
+    expect(json).not.toContain('Name ');
+    expect(json).not.toMatch(/point/i);
+    const chart = (slides[0]!.steps[0] as { children: { type: string; bars?: { label: string; value: number }[] }[] }).children[0]!;
+    expect(chart.bars!.map((b) => [b.label, b.value])).toEqual([
+      ['200–250 ms', 1],
+      ['250–300 ms', 1],
+      ['300–350 ms', 0],
+      ['350–400 ms', 0],
+      ['400–500 ms', 0],
+      ['500–750 ms', 1],
+    ]);
   });
 
   it('swaps min/max delay when misconfigured', () => {

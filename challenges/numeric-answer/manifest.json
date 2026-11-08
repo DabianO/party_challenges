@@ -1,7 +1,7 @@
 {
   "id": "numeric-answer",
   "name": "Numeric Answer",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "apiVersion": "2",
   "category": "knowledge",
   "description": "Enter a number. Answers within the configured tolerance of the correct value score points.",

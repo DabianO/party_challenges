@@ -4,9 +4,11 @@
  * Each player gets a task ("Take a selfie with someone wearing red"), a per-player time
  * limit and one shot: they upload a photo as evidence (`media://` ref produced by the
  * platform's file input). The engine assigns a judge (peer, host or hybrid) who checks
- * the photo against the criteria; this module only maps the decision to points.
+ * the photo against the criteria; this module only maps the decision to points. Once
+ * closed, the host can show the task with every photo on the big screen, six to a slide
+ * (`presentation`); rejected photos are left out without a word.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -39,6 +41,8 @@ interface Evaluation {
 }
 
 const MEDIA_REF = /^media:\/\/[A-Za-z0-9_-]+$/;
+/** Photos per presentation slide. */
+const PER_SLIDE = 6;
 
 function nameOf(players: PlayerRef[], id: string): string {
   return players.find((p) => p.id === id)?.displayName ?? 'Unknown';
@@ -155,6 +159,27 @@ export default defineModule<Config, State, Input, Evaluation>({
       [ui.title(state.config.task, { align: 'center' }), ui.badge(`${count} photo${count === 1 ? '' : 's'} so far`, count > 0 ? 'primary' : 'muted')],
       { gap: 'lg', align: 'center' },
     );
+  },
+
+  presentation(state, evaluations, ctx): PresentationSlide[] {
+    const shown = evaluations.filter((e) => e.approved && e.photo);
+    const slides: PresentationSlide[] = [];
+    for (let i = 0; i < shown.length; i += PER_SLIDE) {
+      const page = shown.slice(i, i + PER_SLIDE);
+      const columns = page.length === 1 ? 1 : page.length <= 4 ? 2 : 3;
+      const cells = page.map((e) =>
+        ui.stack([ui.image(ctx.mediaUrl(e.photo), { maxHeight: page.length === 1 ? '60vh' : '30vh', alt: `${e.displayName}'s photo` }), ui.text(e.displayName, { align: 'center' })], {
+          gap: 'sm',
+          align: 'center',
+        }),
+      );
+      slides.push({
+        caption: shown.length > PER_SLIDE ? `Photos ${i + 1}–${i + page.length} of ${shown.length}` : undefined,
+        steps: [ui.stack([ui.subtitle(state.config.task, { align: 'center' }), ui.grid(columns, cells, { gap: 'lg' })], { gap: 'md', align: 'stretch' })],
+        stepSeconds: 12,
+      });
+    }
+    return slides;
   },
 
   resultsView(state, evaluations, ctx) {

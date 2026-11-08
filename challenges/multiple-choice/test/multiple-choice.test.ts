@@ -50,7 +50,7 @@ const sub = (playerId: string, answer: unknown, startedAt: number, elapsedMs: nu
 describe('multiple-choice', () => {
   it('has a consistent v2 manifest', () => {
     expect(mod.manifest.id).toBe('multiple-choice');
-    expect(mod.manifest.version).toBe('2.2.0');
+    expect(mod.manifest.version).toBe('2.3.0');
     expect(mod.manifest.apiVersion).toBe('2');
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
     expect(mod.manifest.results).toBe('immediate');
@@ -220,5 +220,36 @@ describe('multiple-choice', () => {
     expect(JSON.stringify(results.guestUi!(players[3]!))).toContain('did not answer');
     // Before anyone finished, results are still renderable.
     expect(JSON.stringify(mod.resultsView(state, [], ctx).ui)).toContain('0 of 0 correct');
+  });
+
+  it('presents the question and the room’s answers, then reveals the right one, without names or points', () => {
+    const { ctx, clock } = fakeCtx();
+    const t0 = clock.now;
+    const state = mod.createInstance({ ...config, media: 'media://flag' }, ctx);
+    expect(mod.presentation!(state, [], ctx)).toEqual([]);
+    const evaluations = [
+      mod.evaluate(state, [sub('p3', 'A', t0, 1_000)], ctx),
+      mod.evaluate(state, [sub('p1', 'B', t0, 2_000)], ctx),
+      mod.evaluate(state, [sub('p2', 'B', t0, 10_000)], ctx),
+    ];
+    const slides = mod.presentation!(state, evaluations, ctx);
+    expect(slides).toHaveLength(1);
+    const [ask, reveal] = slides[0]!.steps.map((s) => JSON.stringify(s));
+    expect(slides[0]!.steps).toHaveLength(2);
+    expect(ask).toContain('Capital of France?');
+    expect(ask).toContain('media://flag');
+    expect(ask).toContain('"label":"B. Paris","value":2,"highlight":false');
+    expect(ask).not.toContain('"highlight":true');
+    expect(ask).toContain('3 answers');
+    expect(reveal).toContain('"label":"B. Paris","value":2,"highlight":true');
+    expect(reveal).toContain('2 of 3 right');
+    const all = JSON.stringify(slides);
+    for (const p of players) expect(all).not.toContain(p.displayName);
+    expect(all).not.toMatch(/point|ranking|fastest/i);
+    // No correct answer configured: the distribution only.
+    const open = mod.createInstance({ ...config, correctIndex: 9 }, ctx);
+    const openSlides = mod.presentation!(open, [mod.evaluate(open, [sub('p1', 'A', t0, 1_000)], ctx)], ctx);
+    expect(openSlides[0]!.steps).toHaveLength(1);
+    expect(JSON.stringify(openSlides)).not.toContain('"highlight":true');
   });
 });

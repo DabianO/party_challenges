@@ -1,7 +1,7 @@
 {
   "id": "time-estimation",
   "name": "Time Estimation",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": "2",
   "category": "skill",
   "description": "Without looking at a clock or phone, tap Stop when you think exactly 45 seconds have passed since you started. The closer, the more points.",

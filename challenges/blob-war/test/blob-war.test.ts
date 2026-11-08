@@ -196,7 +196,7 @@ describe('blob-war territory', () => {
 
 describe('blob-war', () => {
   it('has a consistent manifest: live actions, scored when closed', () => {
-    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.5.0', category: 'creativity', apiVersion: '2', results: 'onClose' });
+    expect(mod.manifest).toMatchObject({ id: 'blob-war', version: '1.6.0', category: 'creativity', apiVersion: '2', results: 'onClose' });
     expect(mod.manifest.capabilities).toContain('real-time-burst');
     expect(typeof mod.onPlayerJoin).toBe('function');
   });

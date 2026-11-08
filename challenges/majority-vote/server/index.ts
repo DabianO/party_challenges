@@ -5,7 +5,7 @@
  * their own time limit; when the host closes the challenge all votes are tallied and
  * players on the winning side (majority or minority, configurable) score.
  */
-import { defineModule, ui, type Manifest, type PlayerRef, type UINode } from '@challenge/contract';
+import { defineModule, ui, type Manifest, type PlayerRef, type PresentationSlide, type UINode } from '@challenge/contract';
 import manifestJson from '../manifest.json' with { type: 'json' };
 import schemaJson from '../config.schema.json' with { type: 'json' };
 
@@ -231,6 +231,40 @@ export default defineModule<Config, State, Input, Evaluation>({
     }
     children.push(ui.badge(`${plural(cast, 'vote')} so far`, cast > 0 ? 'primary' : 'muted'));
     return ui.stack(children, { gap: 'lg', align: 'stretch' });
+  },
+
+  presentation(state, evaluations): PresentationSlide[] {
+    // Step 1: the question and how the room voted; step 2: the same, with the winning side lit up.
+    // Aggregates only: no names, no list of who scored.
+    const c = state.config;
+    const evaluation = evaluations[0];
+    if (!evaluation || evaluation.total === 0) return [];
+    const ids = optionIds(c);
+    const side = evaluation.mode === 'minority' ? 'Minority' : 'Majority';
+    const winners = evaluation.winningIds;
+    const step = (reveal: boolean): UINode => {
+      const chart = ui.barChart(
+        ids.map((id) => {
+          const lit = reveal && winners.includes(id);
+          return { label: optionLabel(c, id), value: evaluation.counts[id] ?? 0, highlight: lit, tone: lit ? ('success' as const) : ('neutral' as const) };
+        }),
+        { percent: true },
+      );
+      const verdict = reveal
+        ? ui.display(`${side}${winners.length > 1 ? ' (tie)' : ''}: ${winners.map((id) => optionText(c, id)).join(' · ')}`, { tone: 'success' })
+        : ui.display('?', { tone: 'muted' });
+      return ui.stack(
+        [
+          ui.title(c.question, { align: 'center' }),
+          ui.caption(evaluation.mode === 'minority' ? 'The least popular side scores' : 'The most popular side scores', { align: 'center' }),
+          chart,
+          verdict,
+          ui.row([ui.badge(plural(evaluation.total, 'vote')), ...(reveal && evaluation.unanimous ? [ui.badge('Unanimous!', 'primary')] : [])], { gap: 'sm', justify: 'center' }),
+        ],
+        { gap: 'md', align: 'stretch' },
+      );
+    };
+    return [{ steps: [step(false), step(true)], stepSeconds: 10 }];
   },
 
   resultsView(state, evaluations) {
