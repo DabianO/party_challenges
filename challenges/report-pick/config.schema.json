@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "required": ["prompt", "options"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "title": "What players report",
+      "description": "E.g. \"Which colour ball did you pick from the bag?\"",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "options": {
+      "type": "array",
+      "title": "Options",
+      "description": "Between 2 and 12. Each is worth its own points (below 0 takes points off). Tick Colour to give its button that colour.",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "title": "option",
+        "required": ["label", "points"],
+        "properties": {
+          "label": { "type": "string", "title": "Option", "minLength": 1, "maxLength": 40 },
+          "points": { "type": "integer", "title": "Points", "minimum": -1000, "maximum": 1000 },
+          "color": { "type": "string", "format": "color", "title": "Colour" }
+        }
+      },
+      "default": [
+        { "label": "Gold", "points": 10, "color": "#f2c230" },
+        { "label": "Red", "points": 5, "color": "#e53935" },
+        { "label": "Blue", "points": 2, "color": "#1e88e5" },
+        { "label": "Black", "points": -3, "color": "#212121" }
+      ]
+    },
+    "picks": {
+      "type": "integer",
+      "title": "Picks per player",
+      "description": "How many times each player reports (e.g. 3 draws from the bag). The points of all their picks add up.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 1
+    },
+    "showPoints": {
+      "type": "boolean",
+      "title": "Show the points on the buttons",
+      "description": "Off: players only find out what their pick was worth after reporting it.",
+      "default": true
+    }
+  }
+}

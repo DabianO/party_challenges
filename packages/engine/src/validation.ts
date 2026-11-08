@@ -9,6 +9,8 @@ const ajv = new Ajv({ allErrors: true, useDefaults: true, coerceTypes: true, str
 addFormats(ajv);
 // MR-8: media references produced by the platform media service.
 ajv.addFormat('media-ref', /^media:\/\/[A-Za-z0-9_-]+$/);
+// A colour picked in the setup form (`#rrggbb`).
+ajv.addFormat('color', /^#[0-9a-fA-F]{6}$/);
 
 const cache = new WeakMap<JsonSchema, ValidateFunction>();
 

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import type {
   AudioNode,
   BadgeNode,
@@ -36,6 +36,7 @@ import { isInputNode, walkUI } from '@challenge/contract';
 import { resolveMedia } from '../lib/media';
 import { readDraft, saveDraft } from '../lib/storage';
 import { formatPoints } from '../lib/time';
+import { contrastColor, isHexColor } from '../lib/branding';
 import { BlobField } from './blobs/BlobField';
 import { Countdown } from './Countdown';
 import { TapPad } from './TapPad';
@@ -556,7 +557,7 @@ function BarChart({ node }: { node: BarChartNode }) {
               {bar.label}
             </span>
             <span className="ui-bar-track" role="cell" aria-label={`${bar.label}: ${label}`}>
-              <span className="ui-bar-fill" style={{ width: `${(v / max) * 100}%` }} />
+              <span className={`ui-bar-fill${isHexColor(bar.color) ? ' has-color' : ''}`} style={{ width: `${(v / max) * 100}%`, ...(isHexColor(bar.color) ? { background: bar.color } : {}) }} />
             </span>
             <span className="ui-bar-value mono" role="cell">
               {label}
@@ -635,13 +636,15 @@ function Choices({ node }: { node: ChoicesInputNode }) {
     >
       {node.options.map((opt, i) => {
         const isSelected = selected.has(opt.id);
+        const color = isHexColor(opt.color) ? opt.color : undefined;
         return (
           <button
             key={opt.id}
             type="button"
             role={node.multiple ? 'checkbox' : 'radio'}
             aria-checked={isSelected}
-            className={`choice tone-${opt.tone ?? 'neutral'}${isSelected ? ' is-selected' : ''}`}
+            className={`choice tone-${opt.tone ?? 'neutral'}${isSelected ? ' is-selected' : ''}${color ? ' has-color' : ''}`}
+            style={color ? ({ '--choice-color': color, '--choice-text': contrastColor(color) } as CSSProperties) : undefined}
             disabled={disabled}
             onClick={() => pick(opt.id)}
           >

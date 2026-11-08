@@ -1327,6 +1327,10 @@ legend {
 .ui-bar.tone-warning .ui-bar-fill {
   background: var(--warning);
 }
+/* Its own colour may be as dark as the track (a black ball): a light edge keeps it visible. */
+.ui-bar-fill.has-color {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 40%, transparent);
+}
 .ui-bar.is-highlight .ui-bar-label {
   color: var(--accent-text);
 }
@@ -1453,6 +1457,33 @@ legend {
 .ui-readonly .choice {
   cursor: default;
   opacity: 1;
+}
+/* A choice with its own colour (`color` on the option): filled, the picked one ringed. */
+.choice.has-color {
+  background: var(--choice-color);
+  color: var(--choice-text);
+  border-color: color-mix(in srgb, var(--choice-color) 65%, var(--text));
+}
+.choice.has-color .choice-letter {
+  background: color-mix(in srgb, var(--choice-text) 22%, transparent);
+  border-color: transparent;
+  color: inherit;
+}
+.choice.has-color .choice-check {
+  color: inherit;
+}
+.choice.has-color.is-selected {
+  background: var(--choice-color);
+  border-color: var(--choice-text);
+  outline: 4px solid var(--accent);
+  outline-offset: 2px;
+}
+.choice.has-color.is-selected .choice-letter {
+  background: var(--choice-text);
+  color: var(--choice-color);
+}
+.ui-choices:has(.choice.has-color):has(.choice.is-selected) .choice:not(.is-selected) {
+  opacity: 0.5;
 }
 
 /* Display-scale module UI ------------------------------------------------ */
@@ -3117,6 +3148,21 @@ body.has-bg-image .challenge-top {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+}
+.color-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.color-field input[type='color'] {
+  width: 44px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   cursor: pointer;
 }
 .schema-form .input-special {

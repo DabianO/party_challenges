@@ -35,6 +35,7 @@ const EXPECTED_MODULES = [
   'open-performance',
   'photo-hunt',
   'prediction',
+  'report-pick',
   'report-score',
   'rivalries',
   'secret-word',
@@ -117,6 +118,12 @@ const SCENARIOS: Record<string, Scenario> = {
   },
   // Self-judged, one word per attempt: answer about the word the player's screen shows.
   // The number is the score (decided outside the app), up to the maximum; then the player is done.
+  // An option tapped from the host's list (a ball drawn from a bag); one pick each by default.
+  'report-pick': {
+    configuration: { prompt: 'Which ball?', options: [{ label: 'Gold', points: 10, color: '#f2c230' }, { label: 'Black', points: -3 }] },
+    inputs: (i) => ({ option: String(i % 2) }),
+    noReplay: true,
+  },
   'report-score': {
     configuration: { prompt: 'Darts score?', maxPoints: 20, penalty: 5 },
     inputs: (i) => ({ value: i === 0 ? 17 : 4 + i }),

@@ -89,7 +89,7 @@ Consequences for module code:
 Standard JSON Schema (draft-07 subset). The host UI renders a form from it; the server
 validates against it and applies `default`s (MR-7). Supported field types in the form
 generator: `string` (with optional `enum`, `maxLength`, `format: "media-ref"` for image
-upload), `number`/`integer` (with `minimum`/`maximum`), `boolean`, and `array` of
+upload, `format: "color"` for an optional `#rrggbb` colour: a checkbox, then a colour picker), `number`/`integer` (with `minimum`/`maximum`), `boolean`, and `array` of
 `string` or of flat `object`s. Use `title` and `description` for labels and help text.
 
 A number with one special value besides its range is written as
@@ -313,8 +313,8 @@ Views return trees of UI nodes built with the `ui` helpers from `@challenge/cont
 | `ui.image(src, {maxHeight, hidden})`, `ui.video(src)`, `ui.audio(src)` | media (`hidden` blurs an image) |
 | `ui.timer(tag, {size, label})` | countdown for a scheduled timer |
 | `ui.badge(text, tone)`, `ui.progress(value, max)`, `ui.card(children, tone)` | status |
-| `ui.list(items)`, `ui.barChart(bars, {percent})`, `ui.ranking(rows)` | results |
-| `ui.choices(name, options, {multiple, columns, submitOnSelect, value})` | option buttons |
+| `ui.list(items)`, `ui.barChart(bars, {percent})`, `ui.ranking(rows)` | results; a bar with `color` (`#rrggbb`) is filled with it |
+| `ui.choices(name, options, {multiple, columns, submitOnSelect, value})` | option buttons; an option with `color` (`#rrggbb`) is a button in that colour |
 | `ui.numberInput(name, {...})`, `ui.textInput(name, {...})`, `ui.slider(name,min,max)`, `ui.toggle(name,label)` | inputs |
 | `ui.fileInput(name, {accept, capture, label})` | evidence upload; the payload gets a `media://` ref (§14.6) |
 | `ui.submit(label, {payload, size, tone})` | submit button; `payload` is merged into the form fields |

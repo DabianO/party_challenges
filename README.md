@@ -52,7 +52,7 @@ ended) creates a clean copy (new code, no players or scores), e.g. to go from a 
 to the real party. The old game is kept; *Continue this game* brings an ended or closed
 game back to in progress with everyone's points.
 
-To try everything quickly, seed a demo game containing all twenty-eight modules while `npm run dev`
+To try everything quickly, seed a demo game containing all twenty-nine modules while `npm run dev`
 is running. It prints the host, display and join URLs:
 
 ```bash
@@ -135,9 +135,10 @@ docs/                                    Architecture and module-authoring docum
 | `likelihoods` | social | on close | automatic | how likely, 0–100%, histogram with the average |
 | `agree-to-disagree` | social | on close | automatic | seven levels from fully agree to fully disagree |
 | `report-score` | other | immediate | automatic | the number a player fills in is their points (decided outside the app), up to a maximum; above it costs a penalty (not announced beforehand) and closes it for that player until the host reopens it (repeat attempts, `canStart` → `finished`, `playerNote` tone, `closedFor` / `reopenFor`); optionally players may improve it later (`allowImprove`): each entry scores what it adds to their best, so their total is their best |
+| `report-pick` | other | immediate | automatic | like `report-score`, but players tap what they got (the colour of the ball they drew) from the host's options, each worth its own points (negative too); options may have their own colour (`format: "color"` in the setup form, `color` on choice buttons and bars); one pick per player or several that add up; presentation: how often each option was picked |
 | `secret-word` | creativity | immediate | automatic (self-judged) | one word per repeated attempt, unique words per game from a built-in list of ~1,400 with their Dutch translation in brackets, the host's own instead or added to it (with a chance for theirs to come next), left open while the player waits for the right moment |
 
-All twenty-eight run on the same engine without engine changes (spec §21.3). Add your own by
+All twenty-nine run on the same engine without engine changes (spec §21.3). Add your own by
 creating a folder under `challenges/` — see the authoring guide.
 
 ## Scripts

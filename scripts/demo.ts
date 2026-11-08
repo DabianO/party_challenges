@@ -155,6 +155,19 @@ async function main(): Promise<void> {
     { title: 'Fill in the blanks' },
   );
   await add('report-score', { prompt: 'How many points did you score at darts?', maxPoints: 20, penalty: 5 }, { title: 'Darts' });
+  await add(
+    'report-pick',
+    {
+      prompt: 'Which colour ball did you pick from the bag?',
+      options: [
+        { label: 'Gold', points: 10, color: '#f2c230' },
+        { label: 'Red', points: 5, color: '#e53935' },
+        { label: 'Blue', points: 2, color: '#1e88e5' },
+        { label: 'Black', points: -3, color: '#212121' },
+      ],
+    },
+    { title: 'Lucky dip' },
+  );
   const hot = { category: 'Hot Takes' };
   await add('sliding-scales', { statements: [{ text: 'Maximum acceptable shower time', min: 0, max: 60, step: 1, unit: 'minutes' }, { text: 'Ideal number of pets', min: 0, max: 5 }] }, { title: 'Sliding scales', ...hot });
   await add('rivalries', { statements: [{ left: 'Star Wars', right: 'Star Trek', middle: 'Star Wars and Star Trek are basically the same' }] }, { title: 'Rivalries', ...hot });

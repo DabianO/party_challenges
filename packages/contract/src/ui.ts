@@ -94,7 +94,8 @@ export interface ListNode {
 
 export interface BarChartNode {
   type: 'bar-chart';
-  bars: { label: string; value: number; highlight?: boolean; tone?: Tone }[];
+  /** `color` (#rrggbb) fills that bar instead of its tone. */
+  bars: { label: string; value: number; highlight?: boolean; tone?: Tone; color?: string }[];
   /** Show value labels as percentages of the total. */
   percent?: boolean;
 }
@@ -139,6 +140,8 @@ export interface ChoiceOption {
   /** Optional media shown with the option. */
   image?: string;
   tone?: Tone;
+  /** `#rrggbb`: the button is filled with this colour (text in black or white to match). */
+  color?: string;
 }
 
 export interface ChoicesInputNode {

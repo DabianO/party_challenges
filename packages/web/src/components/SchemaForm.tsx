@@ -102,6 +102,8 @@ export function configSummary(schema: JsonSchema | undefined, configuration: Rec
 // Validation
 // ---------------------------------------------------------------------------
 
+const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
 function isEmpty(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
@@ -114,6 +116,7 @@ function validateField(prop: Prop, v: unknown, required: boolean): string | null
       if (prop.minLength !== undefined && s.length < prop.minLength) return `At least ${prop.minLength} characters`;
       if (prop.maxLength !== undefined && s.length > prop.maxLength) return `At most ${prop.maxLength} characters`;
       if (prop.enum && !prop.enum.includes(s)) return 'Pick one of the options';
+      if (prop.format === 'color' && !COLOR_RE.test(s)) return 'Pick a colour';
       return null;
     }
     case 'number':
@@ -269,6 +272,7 @@ function FieldControl({ prop, value, onChange, upload, id, label, required }: Fi
   switch (prop.type) {
     case 'string':
       if (prop.format === 'media-ref') return <MediaField id={id} value={typeof value === 'string' ? value : ''} onChange={onChange} upload={upload} />;
+      if (prop.format === 'color') return <ColorField id={id} label={label} value={value} onChange={onChange} />;
       if (prop.enum) {
         return (
           <select id={id} className="input" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} required={required}>
@@ -510,6 +514,7 @@ function CellInput({ id, prop, label, value, onChange }: { id?: string; prop: Pr
       />
     );
   }
+  if (prop.format === 'color') return <ColorField id={id} label={label} value={value} onChange={onChange} />;
   if (prop.enum) {
     return (
       <select id={id} className="input input-sm" aria-label={label} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)}>
@@ -523,6 +528,35 @@ function CellInput({ id, prop, label, value, onChange }: { id?: string; prop: Pr
     );
   }
   return <input id={id} className="input input-sm" type="text" aria-label={label} maxLength={prop.maxLength} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
+}
+
+/**
+ * An optional colour (`format: "color"`, `#rrggbb`): a checkbox turns it on, then a picker.
+ * Off leaves the value out.
+ */
+function ColorField({ id, label, value, onChange }: { id?: string; label: string; value: unknown; onChange: (v: unknown) => void }) {
+  const color = typeof value === 'string' && COLOR_RE.test(value) ? value : null;
+  // Remembers the last colour while switched off, so switching back on restores it.
+  const [last, setLast] = useState(color ?? '#e53935');
+  return (
+    <span className="color-field">
+      <label className="check-inline">
+        <input id={id} type="checkbox" checked={color !== null} aria-label={`${label}: on or off`} onChange={(e) => onChange(e.target.checked ? last : undefined)} />
+        {color === null && <span className="muted small">none</span>}
+      </label>
+      {color !== null && (
+        <input
+          type="color"
+          aria-label={label}
+          value={color}
+          onChange={(e) => {
+            setLast(e.target.value);
+            onChange(e.target.value);
+          }}
+        />
+      )}
+    </span>
+  );
 }
 
 function RowButtons({ index, length, canRemove, onMove, onRemove }: { index: number; length: number; canRemove: boolean; onMove: (to: number) => void; onRemove: () => void }) {

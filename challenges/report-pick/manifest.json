@@ -1,0 +1,15 @@
+{
+  "id": "report-pick",
+  "name": "Report Your Pick",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "category": "other",
+  "description": "Players tap what they got outside the app (the colour of the ball they drew from a bag, the card they turned over) from a list the host defines. Each option is worth its own points, negative ones too, and its button can have its own colour.",
+  "players": { "min": 1, "max": null },
+  "duration": { "typicalSeconds": 15 },
+  "capabilities": ["multiple-choice", "statistics"],
+  "evaluation": { "mode": "automatic" },
+  "results": "immediate",
+  "resubmission": "none",
+  "attempts": "repeat"
+}
