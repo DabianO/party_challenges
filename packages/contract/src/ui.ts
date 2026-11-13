@@ -433,7 +433,7 @@ export interface AimTarget {
 }
 
 /**
- * A 16:9 field with a crosshair, its home base and targets (balloons) that float a little,
+ * A 16:9 field with a crosshair and targets (balloons) that float a little,
  * meant for the big screen (`displayOverlay`). Positions are 0..1 across and down; the
  * crosshair glides to each new position. `bursts` play a pop where a target was hit, with a
  * short text (e.g. who hit it); give each burst a new id. `shot` flashes at the latest shot (a
@@ -442,8 +442,6 @@ export interface AimTarget {
 export interface AimFieldNode {
   type: 'aim-field';
   crosshair: { x: number; y: number };
-  /** The square the crosshair starts from; `size` as a share of the field's width. */
-  home: { x: number; y: number; size: number };
   targets: AimTarget[];
   bursts?: { id: string; x: number; y: number; text: string; color?: string }[];
   shot?: { id: string; x: number; y: number };
@@ -692,10 +690,9 @@ export const ui = {
   }),
   wordEntry: (action: string, opts: Omit<WordEntryNode, 'type' | 'action'> = {}): WordEntryNode => ({ type: 'word-entry', action, ...opts }),
   dPad: (action: string, opts: Omit<DPadNode, 'type' | 'action'> = {}): DPadNode => ({ type: 'd-pad', action, ...opts }),
-  aimField: (crosshair: AimFieldNode['crosshair'], home: AimFieldNode['home'], targets: AimTarget[], bursts: NonNullable<AimFieldNode['bursts']> = [], shot?: AimFieldNode['shot']): AimFieldNode => ({
+  aimField: (crosshair: AimFieldNode['crosshair'], targets: AimTarget[], bursts: NonNullable<AimFieldNode['bursts']> = [], shot?: AimFieldNode['shot']): AimFieldNode => ({
     type: 'aim-field',
     crosshair,
-    home,
     targets,
     bursts,
     ...(shot ? { shot } : {}),

@@ -99,7 +99,7 @@ export function SetupTab({ ctx }: { ctx: HostCtx }) {
       <details className="card settings-details">
         <summary>
           <span className="section-title">⚙ Game settings</span>
-          <span className="muted small">Name, late joining, evaluation, branding</span>
+          <span className="muted small">Name, late joining, big screen, evaluation, branding</span>
         </summary>
         <GameSettingsForm key={`${game.name}|${JSON.stringify(game.settings)}|${JSON.stringify(game.branding)}`} ctx={ctx} />
       </details>

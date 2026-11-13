@@ -121,6 +121,7 @@ const timerKey = (instanceId: string, playerId: string | null, tag: string) => `
 const assignmentKey = (assignmentId: string) => `assignment|${assignmentId}`;
 const SPOTLIGHT_TIMER = 'spotlight';
 const PRESENTATION_TIMER = 'presentation';
+const STANDINGS_TIMER = 'standings';
 /** Host actions that still work once the game is finished. */
 const ALWAYS_ALLOWED = new Set<string>(['reveal-results', 'reopen-game', 'start-presentation', 'move-presentation', 'autoplay-presentation', 'stop-presentation']);
 
@@ -167,6 +168,8 @@ export class GameRuntime {
     this.doc.attempts ??= [];
     this.doc.assignments ??= [];
     this.doc.resultsRevealed ??= false;
+    // Settings added since the game was saved get their defaults.
+    this.doc.settings = { ...DEFAULT_SETTINGS, ...this.doc.settings };
     this.doc.standings ??= null;
     this.doc.standingsFeed ??= [];
     this.doc.spotlight ??= emptySpotlight();
@@ -241,6 +244,7 @@ export class GameRuntime {
       }
     }
     this.updateSpotlight();
+    this.armStandings();
     this.persist();
   }
 
@@ -368,7 +372,12 @@ export class GameRuntime {
       if (!Number.isInteger(s.maxReassignments) || s.maxReassignments < 0 || s.maxReassignments > 10) {
         throw validationError('Max reassignments must be between 0 and 10');
       }
+      if (!Number.isInteger(s.standingsEveryMinutes) || s.standingsEveryMinutes < 0 || s.standingsEveryMinutes > 240) {
+        throw validationError('Automatic big-screen updates must be every 0 (off) to 240 minutes');
+      }
+      if (typeof s.publicDisplay !== 'boolean') throw validationError('publicDisplay must be true or false');
       this.doc.settings = s;
+      this.armStandings();
     }
     if (patch.branding) this.doc.branding = { ...this.doc.branding, ...patch.branding };
     this.commit();
@@ -1403,9 +1412,32 @@ export class GameRuntime {
     if (this.doc.standingsFeed.length > STANDINGS_FEED_LIMIT) this.doc.standingsFeed.splice(0, this.doc.standingsFeed.length - STANDINGS_FEED_LIMIT);
     this.queueEvent('STANDINGS_PUBLISHED', 'main', { changes: changes.length });
     this.queueEvent('STANDINGS_PUBLISHED', 'host', { changes: changes.length });
+    // The automatic update counts from this copy, whoever made it.
+    this.armStandings();
     this.commit();
     const n = changes.length;
     return { ok: true, message: n ? `Big screen updated: ${n} ${n === 1 ? 'change' : 'changes'} in the ranking` : 'Big screen updated: no changes in the ranking' };
+  }
+
+  /**
+   * While the game runs (not paused), copy the standings to the big screen by itself every
+   * `settings.standingsEveryMinutes`, counted from the last copy (or the start). Called whenever
+   * one of those changes; the timer itself lives in memory only.
+   */
+  private armStandings(): void {
+    this.clearHandle(STANDINGS_TIMER);
+    const minutes = this.doc.settings.standingsEveryMinutes;
+    if (this.doc.status !== 'IN_PROGRESS' || this.doc.paused || !(minutes > 0)) return;
+    const now = this.deps.clock();
+    const due = (this.doc.standings?.publishedAt ?? this.doc.startedAt ?? now) + minutes * 60_000;
+    this.timerHandles.set(
+      STANDINGS_TIMER,
+      this.deps.setTimer(() => {
+        if (this.disposed) return;
+        this.timerHandles.delete(STANDINGS_TIMER);
+        if (this.doc.status === 'IN_PROGRESS' && !this.doc.paused) this.publishStandings();
+      }, Math.max(0, due - now)),
+    );
   }
 
   private liveLeaderboard(): LeaderboardEntry[] {
@@ -1445,6 +1477,7 @@ export class GameRuntime {
       if (inst.phase === 'PENDING' && inst.availability !== 'host-unlocked') this.openInstance(inst);
     }
     this.updateSpotlight();
+    this.armStandings();
     this.queueEvent('GAME_STARTED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1622,6 +1655,7 @@ export class GameRuntime {
     this.assertInProgress();
     if (this.doc.paused) return { ok: true };
     this.doc.paused = true;
+    this.armStandings();
     const now = this.deps.clock();
     for (const inst of this.doc.instances) {
       for (const t of inst.timers) {
@@ -1664,6 +1698,7 @@ export class GameRuntime {
       }
     }
     this.updateSpotlight();
+    this.armStandings();
     this.queueEvent('GAME_RESUMED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1690,6 +1725,7 @@ export class GameRuntime {
     this.doc.status = 'GAME_RESULTS';
     this.doc.finishedAt = this.deps.clock();
     this.updateSpotlight();
+    this.armStandings();
     this.queueEvent('GAME_FINISHED', 'all', {});
     this.commit();
     return { ok: true };
@@ -1712,6 +1748,7 @@ export class GameRuntime {
       this.queueEvent('RESULTS_HIDDEN', 'all', {});
     }
     this.updateSpotlight();
+    this.armStandings();
     this.queueEvent('GAME_REOPENED', 'all', {});
     this.commit();
     return { ok: true, message: wasClosed ? `Game continued — join code ${this.doc.code}. Reopen the challenges players should play.` : 'Game continued. Reopen the challenges players should play.' };

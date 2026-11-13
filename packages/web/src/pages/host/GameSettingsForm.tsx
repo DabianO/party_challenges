@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { Branding, EvaluationPreference, GameSettings, TieBreak } from '@challenge/contract';
 import { api, errorMessage } from '../../lib/api';
 import { isHexColor } from '../../lib/branding';
+import { useInternetMode } from '../../lib/display';
 import { resolveMedia } from '../../lib/media';
 import type { HostCtx } from './hostApi';
 
@@ -24,6 +25,7 @@ const DEADLINE_MIN = 10;
 const DEADLINE_MAX = 3600;
 const REASSIGN_MIN = 0;
 const REASSIGN_MAX = 10;
+const STANDINGS_MAX = 240;
 
 function clampInt(v: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(v)) return fallback;
@@ -88,6 +90,7 @@ export function GameSettingsForm({ ctx }: { ctx: HostCtx }) {
   const [branding, setBranding] = useState<Branding>(game.branding);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const internet = useInternetMode();
 
   const setB = <K extends keyof Branding>(key: K, value: Branding[K]) => setBranding((b) => ({ ...b, [key]: value }));
   const setS = <K extends keyof GameSettings>(key: K, value: GameSettings[K]) => setSettings((s) => ({ ...s, [key]: value }));
@@ -143,6 +146,41 @@ export function GameSettingsForm({ ctx }: { ctx: HostCtx }) {
           </select>
           <p className="field-help">{TIE_BREAKS.find((t) => t.value === settings.tieBreak)?.help}</p>
         </div>
+      </fieldset>
+
+      <fieldset className="stack gap-md">
+        <legend className="section-title">Big screen</legend>
+        <label className="field field-compact">
+          <span className="field-label">Update the race by itself every (minutes)</span>
+          <input
+            className="input"
+            type="number"
+            min={0}
+            max={STANDINGS_MAX}
+            step={1}
+            inputMode="numeric"
+            value={settings.standingsEveryMinutes}
+            onChange={(e) => setS('standingsEveryMinutes', clampInt(e.target.valueAsNumber, 0, STANDINGS_MAX, settings.standingsEveryMinutes))}
+          />
+          <span className="field-help">
+            0–{STANDINGS_MAX}. The graph and ranking on the big screen refresh this often while the game runs, counted from the last update (yours
+            too). 0 = only when you press “Update the big screen”.
+          </span>
+        </label>
+        <label className="toggle">
+          <input type="checkbox" role="switch" checked={settings.publicDisplay} onChange={(e) => setS('publicDisplay', e.target.checked)} />
+          <span className="toggle-track" aria-hidden="true">
+            <span className="toggle-thumb" />
+          </span>
+          <span className="toggle-label">
+            Share the big screen online <span className="muted">({settings.publicDisplay ? 'on' : 'off'})</span>
+          </span>
+        </label>
+        <p className="field-help">
+          {internet === false
+            ? 'Only matters when the party is on the internet. On a Wi-Fi party, everyone on the network can open the big screen.'
+            : 'On: anyone with the link (your domain /display/CODE) can watch the big screen, the leaderboard included, from anywhere. Off: only on this computer. Turning it off disconnects screens that are watching.'}
+        </p>
       </fieldset>
 
       <fieldset className="stack gap-md">

@@ -84,7 +84,8 @@ TypeScript runs directly via `tsx` (no build step for backend packages). Imports
 - **Hidden results:** games start with `resultsRevealed = false`; non-host snapshots then
   carry no points, ranks or results (masked in `snapshotFor`/`boardEntry`). Host action
   `reveal-results` / `hide-results`. The big screen instead shows `doc.standings`, a frozen
-  leaderboard copy taken by `publish-standings`, plus `standingsFeed` (`standings.ts`).
+  leaderboard copy taken by `publish-standings` (also by itself every
+  `settings.standingsEveryMinutes` while running, `armStandings`), plus `standingsFeed` (`standings.ts`).
 - **Results timing** (`manifest.results`): `immediate` evaluates each submission alone;
   `onClose` evaluates all submissions when the host closes the challenge (must be automatic).
 - **Evaluation pipeline (§14)** lives entirely in the engine: judge picking (never self, avoid
@@ -126,7 +127,9 @@ assigned judge while pending and before the deadline; UI text is rendered as Rea
 **Internet mode** (`ADMIN_PORT`, `docs/deployment.md`): the public port serves only the
 allow-list in `packages/server/src/surface.ts` (guests and the big screen); host pages and APIs
 exist only on the admin port. A new guest-facing route must be added to that allow-list (and
-its test in `packages/server/test/surface.test.ts`), or it is a 404 online.
+its test in `packages/server/test/surface.test.ts`), or it is a 404 online. The big screen
+(`/ws?role=main&code=`) is allowed there but refused (close 4004) unless the game's
+`settings.publicDisplay` is on; `ConnectionHub` drops public big screens when it goes off.
 
 **Host access:** `/api/local/games` hands host tokens (HMAC of `DATA_DIR/host-key`) to the
 host machine only (`isLocalRequest` in `app.ts`). The Vite proxy must keep `xfwd: true`,

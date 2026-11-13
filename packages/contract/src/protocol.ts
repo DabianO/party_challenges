@@ -36,6 +36,16 @@ export interface GameSettings {
   judgeDeadlineSeconds: number;
   /** FR-64: reassignments before an assignment escalates to the host. */
   maxReassignments: number;
+  /**
+   * While the game runs, copy the standings to the big screen by itself this often (minutes,
+   * counted from the last copy, by hand or not). 0 = only when the host presses the button.
+   */
+  standingsEveryMinutes: number;
+  /**
+   * Internet mode: the big screen may be opened on the public address
+   * (`https://<domain>/display/CODE`). Off: only on the host machine. No effect on a LAN party.
+   */
+  publicDisplay: boolean;
 }
 
 export interface Branding {
@@ -54,6 +64,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   evaluationPreference: 'module-default',
   judgeDeadlineSeconds: 60,
   maxReassignments: 2,
+  standingsEveryMinutes: 15,
+  publicDisplay: false,
 };
 
 export interface GameSummary {

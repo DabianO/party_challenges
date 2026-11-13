@@ -1993,6 +1993,14 @@ legend {
   flex-wrap: wrap;
   padding-top: 12px;
 }
+.display-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
 .code-big {
   font-family: var(--mono);
   font-size: 2.4rem;
@@ -4498,14 +4506,6 @@ body.has-bg-image .challenge-top {
   aspect-ratio: 16 / 9;
   overflow: hidden;
   container-type: inline-size;
-}
-.aim-home {
-  position: absolute;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border: 3px dashed rgba(255, 255, 255, 0.55);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
 }
 .aim-target {
   position: absolute;

@@ -15,6 +15,8 @@ import { formatPoints, relativeTime, useNow } from '../lib/time';
 import { normaliseCode } from './Landing';
 
 const CURSOR_HIDE_MS = 4000;
+/** A big screen the host does not share (yet) tries again this often, so it comes up once shared. */
+const UNSHARED_RETRY_MS = 30_000;
 
 function useIdleCursor(): boolean {
   const [idle, setIdle] = useState(false);
@@ -47,6 +49,12 @@ export function Display() {
   const { snapshot, status, fatal } = sock;
   const idle = useIdleCursor();
   useBranding(snapshot?.game.branding, 'dark');
+  const unshared = fatal?.kind === 'unshared';
+  useEffect(() => {
+    if (!unshared) return;
+    const t = window.setTimeout(() => window.location.reload(), UNSHARED_RETRY_MS);
+    return () => window.clearTimeout(t);
+  }, [unshared]);
 
   const logo = resolveMedia(snapshot?.game.branding.logo);
   const hostName = snapshot?.game.branding.hostName;
@@ -95,7 +103,12 @@ export function Display() {
       </header>
 
       <main className="display-body">
-        {fatal ? (
+        {unshared ? (
+          <div className="display-center">
+            <h1 className="display-h1">This big screen is not shared</h1>
+            <p className="display-p muted">The host has not shared the big screen of game {code} online. This page tries again by itself.</p>
+          </div>
+        ) : fatal ? (
           <div className="display-center">
             <h1 className="display-h1">This game code is no longer active</h1>
             <p className="display-p muted">{fatal.message}</p>

@@ -165,8 +165,14 @@ Edit `.env`:
 3. The QR code and join link now show `https://party.yourdomain.nl/join/CODE`. Guests can use
    Wi-Fi or mobile data.
 4. Big screen:
-   - On another device: `https://party.yourdomain.nl/display/CODE`.
    - On the laptop: `http://localhost:3000/display/CODE`.
+   - On another device, or for people watching from elsewhere:
+     `https://party.yourdomain.nl/display/CODE`. This works only while the game shares it:
+     press **Share it online** under the join link in the Run tab (or switch on "Share the big
+     screen online" in the game settings). The Run tab then shows the link with a Copy button.
+     Anyone with the link sees the big screen, the leaderboard included; **Stop sharing**
+     disconnects them right away. Unshared, that address shows "This big screen is not shared"
+     and tries again every 30 seconds.
 5. Keep the laptop on power, and stop it sleeping for the evening (Settings → System → Power).
 6. Logs: `npm run party:logs`.
 

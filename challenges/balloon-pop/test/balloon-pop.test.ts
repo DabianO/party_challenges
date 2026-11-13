@@ -57,40 +57,45 @@ function withBalloon(ctx: InstanceContext, config = {}): State {
 
 describe('balloon-pop', () => {
   it('has a consistent manifest: live, scored when it closes', () => {
-    expect(mod.manifest).toMatchObject({ id: 'balloon-pop', version: '1.1.0', apiVersion: '2', results: 'onClose', category: 'skill' });
+    expect(mod.manifest).toMatchObject({ id: 'balloon-pop', version: '1.2.0', apiVersion: '2', results: 'onClose', category: 'skill' });
     expect(mod.manifest.evaluation).toEqual({ mode: 'automatic' });
   });
 
-  it('brings the first balloon one interval after opening, with the crosshair at home', () => {
+  it('brings the first balloon one interval after opening, with the crosshair in the middle', () => {
     const { ctx, scheduled } = fakeCtx([ada]);
     let state = mod.createInstance({ intervalMinutes: 2 }, ctx);
     state = mod.onPhaseChange!(state, 'ACTIVE', ctx);
     expect(scheduled).toEqual([{ tag: 'balloon', seconds: 120, playerId: undefined }]);
-    // Before the first balloon: the home base and the crosshair are already on the screen.
-    expect(mod.displayOverlay!(state, ctx)).toMatchObject({ type: 'aim-field', targets: [], crosshair: { x: 1 / 16, y: 8 / 9 } });
+    // Before the first balloon: the crosshair is already on the screen (and nothing else).
+    const empty = mod.displayOverlay!(state, ctx) as AimFieldNode;
+    expect(empty).toMatchObject({ type: 'aim-field', targets: [], crosshair: { x: 0.5, y: 0.5 } });
+    expect(empty).not.toHaveProperty('home');
     expect(mod.displayBanner!(state, ctx)).toBeNull();
     state = mod.onTimer!(state, 'balloon', ctx);
     expect(state.balloon).toMatchObject({ id: 'b1' });
-    expect(state.crosshair).toEqual({ x: 1, y: 8 });
+    expect(state.crosshair).toEqual({ x: 8, y: 4.5 });
+    // Never right under the crosshair (this test's rng would put it there: the far corner instead).
+    expect(Math.hypot(state.balloon!.x - 8, state.balloon!.y - 4.5)).toBeGreaterThanOrEqual(4);
     const overlay = mod.displayOverlay!(state, ctx) as AimFieldNode;
     expect(overlay.type).toBe('aim-field');
     expect(overlay.targets).toHaveLength(1);
-    expect(overlay.crosshair).toEqual({ x: 1 / 16, y: 8 / 9 });
+    expect(overlay.crosshair).toEqual({ x: 0.5, y: 0.5 });
     expect(mod.displayBanner!(state, ctx)).toContain('balloon');
     // A timer while one is still up changes nothing.
     expect(mod.onTimer!(state, 'balloon', ctx)).toBe(state);
   });
 
-  it('places balloons inside the field and well away from home', () => {
+  it('places balloons inside the field and away from wherever the crosshair is', () => {
     let seed = 1;
     const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 200; i++) {
-      const p = spotFor(rng);
+      const crosshair = { x: rng() * 16, y: rng() * 9 };
+      const p = spotFor(rng, crosshair);
       expect(p.x).toBeGreaterThanOrEqual(2);
       expect(p.x).toBeLessThanOrEqual(14);
       expect(p.y).toBeGreaterThanOrEqual(2);
       expect(p.y).toBeLessThanOrEqual(7.8);
-      expect(Math.hypot(p.x - 1, p.y - 8)).toBeGreaterThanOrEqual(5);
+      expect(Math.hypot(p.x - crosshair.x, p.y - crosshair.y)).toBeGreaterThanOrEqual(4);
     }
   });
 
@@ -99,14 +104,15 @@ describe('balloon-pop', () => {
     let state = withBalloon(ctx);
     state = act(state, ctx, ada, { move: [0, -1] });
     state = act(state, ctx, bea, { move: [1, 0] });
-    expect(state.crosshair).toEqual({ x: 1.4, y: 7.6 }); // up + right: diagonal
+    expect(state.crosshair.x).toBeCloseTo(8.4); // up + right: diagonal
+    expect(state.crosshair.y).toBeCloseTo(4.1);
     state = act(state, ctx, ada, { move: [0, -2] });
-    expect(state.crosshair.y).toBeCloseTo(6.8); // up + up: twice as far
+    expect(state.crosshair.y).toBeCloseTo(3.3); // up + up: twice as far
     state = act(state, ctx, bea, { move: [-20, 20] });
-    state = act(state, ctx, bea, { move: [0, 20] });
+    state = act(state, ctx, bea, { move: [-20, 20] });
     expect(state.crosshair).toEqual({ x: 0, y: 9 });
     const fast = withBalloon(ctx, { speed: 'fast' });
-    expect(act(fast, ctx, ada, { move: [1, 0] }).crosshair.x).toBeCloseTo(1.65);
+    expect(act(fast, ctx, ada, { move: [1, 0] }).crosshair.x).toBeCloseTo(8.65);
   });
 
   it('refuses anything but a fire or a small batch of whole presses', () => {
@@ -128,9 +134,9 @@ describe('balloon-pop', () => {
     state = act(state, ctx, bea, { fire: true });
     expect(state.balloon).toBeNull();
     const spot = state.crosshair;
-    expect(spot).not.toEqual({ x: 1, y: 8 });
+    expect(spot).not.toEqual({ x: 8, y: 4.5 });
     expect(state.popped).toEqual([{ balloonId: 'b1', playerId: 'p2', displayName: 'Bea', ms: 12_000 }]);
-    expect(scheduled.filter((s) => s.tag !== 'home').map((s) => [s.tag, s.seconds])).toEqual([
+    expect(scheduled.map((s) => [s.tag, s.seconds])).toEqual([
       ['balloon', 300],
       ['burst', 4],
     ]);
@@ -153,30 +159,23 @@ describe('balloon-pop', () => {
     expect(state.crosshair.y).toBeCloseTo(spot.y + 0.4); // a new balloon does not move it
   });
 
-  it('sends the crosshair home when nobody moved it for a minute', () => {
+  it('leaves the crosshair wherever players put it', () => {
     const { ctx, scheduled } = fakeCtx([ada]);
     let state = withBalloon(ctx);
     scheduled.length = 0;
     state = act(state, ctx, ada, { move: [5, -5] });
-    state = act(state, ctx, ada, { move: [1, 0] });
-    // Every move starts the minute again (the engine replaces a timer with the same tag).
-    expect(scheduled).toEqual([
-      { tag: 'home', seconds: 60, playerId: undefined },
-      { tag: 'home', seconds: 60, playerId: undefined },
-    ]);
-    expect(state.crosshair).not.toEqual({ x: 1, y: 8 });
-    // Shots do not count as moving it.
     state = act(state, ctx, ada, { fire: true });
-    expect(scheduled).toHaveLength(2);
+    // No timer brings it back anywhere; a timer left over from an older version changes nothing.
+    expect(scheduled).toEqual([]);
+    const left = state.crosshair;
     state = mod.onTimer!(state, 'home', ctx);
-    expect(state.crosshair).toEqual({ x: 1, y: 8 });
-    expect(state.balloon?.id).toBe('b1');
+    expect(state.crosshair).toEqual(left);
   });
 
   it('makes a player reload after a miss, so hammering Shoot does not win', () => {
     const { ctx, advance } = fakeCtx([ada, bea]);
     let state = withBalloon(ctx);
-    state = act(state, ctx, ada, { fire: true }); // at home: a miss
+    state = act(state, ctx, ada, { fire: true }); // in the middle, the balloon is in a corner: a miss
     expect(mod.guestView(state, ada, ctx).status).toBe('Missed! Reloading…');
     state = steerOnto(state, ctx, bea);
     state = act(state, ctx, ada, { fire: true }); // on target, but still reloading

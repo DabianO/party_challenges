@@ -39,7 +39,8 @@ phones; host-judged ones appear in your Run tab.
 
 Results stay hidden from guests while the game runs: guests only see which challenges they
 finished. Press **Reveal results** in the Run tab when it is time. The big screen shows the
-points race (graph + overtakes) as of the last time you pressed **Update the big screen**.
+points race (graph + overtakes) as of the last time you pressed **Update the big screen**, or
+as of its own update every 15 minutes (game settings → Big screen; 0 turns it off).
 
 **Saving and backups.** Everything is saved automatically to `data/platform.sqlite` and
 survives restarts. On the machine running the server, `/host` lists every stored game,
@@ -124,7 +125,7 @@ docs/                                    Architecture and module-authoring docum
 | `multi-answer` ("Answer") | knowledge | immediate | automatic | one answer or several (a share of the points each, the remainder only for a full set); lenient text matching, numbers with a tolerance and unit in a number box |
 | `match-up` | knowledge | on close | automatic | two lists filled in side by side, both columns shuffled per player (`ui.pairMatch`); links are live actions, undo any time; leaving with everything linked locks it in (`lockOnLeave`); nothing shows what is right until the results; presentation reveals the right matches one by one |
 | `name-them-all` | knowledge | immediate | automatic | name as many as you can in the time (`ui.wordEntry`); forgiving about capitals, spaces, hyphens and small spelling mistakes (edit distance, by answer length, three settings); points per answer; entries count when the time runs out (`lockInput`); optionally hides what counts until the results |
-| `balloon-pop` | skill | on close | automatic | a balloon floats onto the big screen every few minutes (`displayOverlay`, `ui.aimField`, an instance timer that pauses with the game); everyone with it open steers one shared crosshair from a home base (`ui.dPad`, presses add up); first shot on the balloon pops it, a miss means a short reload; the crosshair stays where it is and every shot flashes, balloon or not; left alone for a minute, it goes back home (an instance timer every move restarts) |
+| `balloon-pop` | skill | on close | automatic | a balloon floats onto the big screen every few minutes (`displayOverlay`, `ui.aimField`, an instance timer that pauses with the game); everyone with it open steers one shared crosshair (`ui.dPad`, presses add up); first shot on the balloon pops it, a miss means a short reload; the crosshair stays wherever players leave it and every shot flashes, balloon or not |
 | `blob-war` | creativity | on close | automatic | live actions (`onAction`, tap pad), big-screen panel (`displayPanel`, territory map → final picture), `onPlayerJoin` (a newcomer clears a full-size circle), the picture as a presentation slide |
 | `group-message` | creativity | immediate | automatic | one player at a time (`canStart`), strictly in turn whether or not their phone is awake (the turn moves on after its time), repeated attempts whose points add up (`attempts: "repeat"`), punctuation never counts towards the words per turn, whose turn it is in the big screen's top bar (`displayBanner`), the message in readable parts as presentation slides |
 | `selfiemotion` | creativity | immediate | peer (automatic, host, hybrid) | a random emoji (evenly spread) to recreate in a selfie; presentation: four selfies a slide next to their emoji |

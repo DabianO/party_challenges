@@ -6,14 +6,13 @@
  * challenge open: every arrow press on any phone (`ui.dPad`, live actions) moves it one step,
  * so presses add up (up + right goes diagonally, up + up twice as far). Whoever shoots first
  * while the crosshair is on the balloon pops it and scores; the next balloon comes one interval
- * later. The crosshair starts on its home base in the corner and stays wherever it is: players
- * can steer and shoot at any time (every shot flashes on the screen), but only a shot on a
- * balloon does anything. A miss at a balloon means a short reload for that player, so hammering
- * the button does not win. When nobody has moved it for a minute, it goes back home.
+ * later. The crosshair starts in the middle and stays wherever players leave it: they can
+ * steer and shoot at any time (every shot flashes on the screen), but only a shot on a balloon
+ * does anything. A miss at a balloon means a short reload for that player, so hammering the
+ * button does not win.
  *
  * Timing is server-side: an instance timer `balloon` brings the next balloon (paused with the
- * game), `burst` clears the pop from the screen, `home` (rescheduled with every move) sends an
- * idle crosshair back to its base. Points are awarded when the host closes it.
+ * game) and `burst` clears the pop from the screen. Points are awarded when the host closes it.
  *
  * The field is 16 × 9 units (the big screen's shape), so a step is as long across as down.
  */
@@ -77,8 +76,10 @@ interface Evaluation {
 const ACTION = 'aim';
 const WIDTH = 16;
 const HEIGHT = 9;
-const HOME: Point = { x: 1, y: HEIGHT - 1 };
-const HOME_SIZE = 1.3;
+/** Where the crosshair starts. */
+const START: Point = { x: WIDTH / 2, y: HEIGHT / 2 };
+/** A new balloon appears at least this far from the crosshair, so it always takes some steering. */
+const MIN_DISTANCE = 4;
 /** Balloon radius for hits; drawn slightly smaller than it counts. */
 const RADIUS = 0.75;
 const STEP: Record<Speed, number> = { slow: 0.25, normal: 0.4, fast: 0.65 };
@@ -86,8 +87,6 @@ const STEP: Record<Speed, number> = { slow: 0.25, normal: 0.4, fast: 0.65 };
 const MAX_BATCH = 20;
 const RELOAD_MS = 1500;
 const BURST_SECONDS = 4;
-/** Nobody moved the crosshair for this long: back to its home base. */
-export const IDLE_HOME_SECONDS = 60;
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6'];
 
 function intervalSeconds(config: Config): number {
@@ -106,16 +105,21 @@ export function onTarget(crosshair: Point, balloon: Point): boolean {
   return Math.hypot(crosshair.x - balloon.x, crosshair.y - balloon.y) <= RADIUS;
 }
 
-/** A spot for a new balloon: inside the field, clear of the top bar's corners and well away from home. */
-export function spotFor(rng: () => number): Point {
-  for (;;) {
-    const p = { x: 2 + rng() * (WIDTH - 4), y: 2 + rng() * (HEIGHT - 3.2) };
-    if (Math.hypot(p.x - HOME.x, p.y - HOME.y) >= 5) return p;
+/** A spot for a new balloon: inside the field, clear of the top bar's corners and away from the crosshair. */
+export function spotFor(rng: () => number, crosshair: Point): Point {
+  const area = { left: 2, top: 2, right: WIDTH - 2, bottom: HEIGHT - 1.2 };
+  const far = (p: Point) => Math.hypot(p.x - crosshair.x, p.y - crosshair.y);
+  for (let i = 0; i < 20; i++) {
+    const p = { x: area.left + rng() * (area.right - area.left), y: area.top + rng() * (area.bottom - area.top) };
+    if (far(p) >= MIN_DISTANCE) return p;
   }
+  // Unlucky draws: the corner of the area farthest from the crosshair (always far enough).
+  const corners = [area.left, area.right].flatMap((x) => [area.top, area.bottom].map((y) => ({ x, y })));
+  return corners.reduce((a, b) => (far(b) > far(a) ? b : a));
 }
 
 function spawn(state: State, ctx: { rng(): number; now(): number }): State {
-  const spot = spotFor(() => ctx.rng());
+  const spot = spotFor(() => ctx.rng(), state.crosshair);
   const color = COLORS[Math.floor(ctx.rng() * COLORS.length)]!;
   return { ...state, balloon: { id: `b${state.spawned + 1}`, ...spot, color, since: ctx.now() }, spawned: state.spawned + 1 };
 }
@@ -150,7 +154,7 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
   configurationSchema: schemaJson,
 
   createInstance(config) {
-    return { config, crosshair: { ...HOME }, balloon: null, spawned: 0, popped: [], burst: null, reload: {} };
+    return { config, crosshair: { ...START }, balloon: null, spawned: 0, popped: [], burst: null, reload: {} };
   },
 
   onPhaseChange(state, phase, ctx) {
@@ -162,7 +166,6 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
   onTimer(state, tag, ctx) {
     if (tag === 'balloon') return state.balloon ? state : spawn(state, ctx);
     if (tag === 'burst') return { ...state, burst: null };
-    if (tag === 'home') return { ...state, crosshair: { ...HOME } };
     return state;
   },
 
@@ -185,8 +188,6 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
     if ('move' in aim) {
       const step = stepOf(state.config);
       const crosshair = { x: clamp(state.crosshair.x + aim.move[0] * step, 0, WIDTH), y: clamp(state.crosshair.y + aim.move[1] * step, 0, HEIGHT) };
-      // Left alone for a minute, it goes back home (every move starts the minute again).
-      ctx.schedule('home', IDLE_HOME_SECONDS);
       return { ...state, crosshair };
     }
     const now = ctx.now();
@@ -267,8 +268,8 @@ export default defineModule<Config, State, Record<string, unknown>, Evaluation>(
     const targets = state.balloon ? [{ id: state.balloon.id, ...at(state.balloon), size: (2 * RADIUS) / WIDTH, color: state.balloon.color }] : [];
     const bursts = state.burst ? [{ id: state.burst.id, ...at(state.burst), text: state.burst.text, color: state.burst.color }] : [];
     const shot = state.lastShot ? { id: `s${state.shots ?? 0}`, ...at(state.lastShot) } : undefined;
-    // Always there while open: the home base, and the crosshair wherever it was left.
-    return ui.aimField(at(state.crosshair), { ...at(HOME), size: HOME_SIZE / WIDTH }, targets, bursts, shot);
+    // Always there while open: the crosshair, wherever it was left.
+    return ui.aimField(at(state.crosshair), targets, bursts, shot);
   },
 
   presentation(state, evaluations): PresentationSlide[] {

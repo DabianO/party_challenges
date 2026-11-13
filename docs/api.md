@@ -27,7 +27,7 @@ Errors are JSON `{ "error": string, "code"?: string }` with status 400 (validati
 | `POST /api/games/import` | – (optional `hostPassword`) | `{ setup: GameSetup }` → new DRAFT game `{ game, hostToken, warnings }`; embedded media is re-stored, unknown modules / invalid configurations are skipped with a warning |
 | `GET /api/local/games` | host machine only | Every stored game with a host token → `{ games: LocalGameInfo[] }`; 403 for other devices (see below) |
 | `GET /api/games/:id` | host | Host snapshot |
-| `PATCH /api/games/:id` | host | Update `name`, `settings` (incl. `evaluationPreference`, `judgeDeadlineSeconds`, `maxReassignments`), `branding` |
+| `PATCH /api/games/:id` | host | Update `name`, `settings` (incl. `evaluationPreference`, `judgeDeadlineSeconds`, `maxReassignments`, `standingsEveryMinutes`, `publicDisplay`), `branding` |
 | `DELETE /api/games/:id` | host | Delete game and its data |
 | `GET /api/games/:id/ledger` | host | Score ledger rows |
 | `POST /api/games/:id/duplicate` | host | Start over: a new DRAFT game with this game's setup and no players or scores → `{ game, hostToken, warnings }`; the original is untouched |
@@ -101,7 +101,7 @@ Every response carries a strict `Content-Security-Policy`, `X-Frame-Options: DEN
 | `move-presentation` | `{ to }`: `next` / `previous` (a step; at a slide's end, the next slide), `next-slide` / `previous-slide`, or `{ instanceId, slide? }` |
 | `autoplay-presentation` | `{ on }`: play by itself (each step for its `stepSeconds`, stopping on the last one; from the end it starts over) or hold |
 | `stop-presentation` | Back to the normal big screen |
-| `publish-standings` | Copy the current leaderboard (with graph lines) to the big screen and append ranking changes (new leader, overtakes, newcomers, drawing level) to the standings feed. The big screen changes only on this action; phones are not affected |
+| `publish-standings` | Copy the current leaderboard (with graph lines) to the big screen and append ranking changes (new leader, overtakes, newcomers, drawing level) to the standings feed. The big screen changes only on this action, or by itself every `settings.standingsEveryMinutes` (default 15, 0 = off) while the game runs and is not paused, counted from the last copy; phones are not affected |
 | `reveal-results` / `hide-results` | Show (or hide again) points, ranks and results to players and the main display. Games start hidden; the host always sees everything. `reveal-results` also works on a FINISHED game |
 | `end-game` | Close every open challenge, hand unanswered peer tasks to the host, → GAME_RESULTS |
 | `close-game` | GAME_RESULTS → FINISHED; game code stops resolving; results are revealed |
@@ -115,7 +115,9 @@ Every response carries a strict `Content-Security-Policy`, `X-Frame-Options: DEN
 Connect with a query string:
 
 - host: `?role=host&gameId=<id>&token=<hostToken>`
-- main display: `?role=main&code=<code>`
+- main display: `?role=main&code=<code>`. In internet mode, on the public server only while the
+  game's `settings.publicDisplay` is on; otherwise (and as soon as the host switches it off) the
+  socket is closed with code `4004`
 - player: `?role=player&code=<code>&token=<sessionToken>`
 
 Server → client (`ServerMessage`): `HELLO`, `EVENT`, `ACK`, `PONG`, `ERROR`. Every state

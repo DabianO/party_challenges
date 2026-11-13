@@ -166,6 +166,27 @@ describe('internet mode: a public and an admin server', () => {
     });
   }
 
+  /** A socket the server refuses after the upgrade: its close code and the fatal message before it. */
+  function closedWith(url: string): Promise<{ code: number; message?: string }> {
+    return new Promise((resolve) => {
+      const ws = new WebSocket(url);
+      let message: string | undefined;
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(String(raw)) as ServerMessage;
+        if (msg.type === 'ERROR') message = msg.message;
+      });
+      ws.on('close', (code) => resolve({ code, message }));
+    });
+  }
+
+  async function until(check: () => boolean, ms = 3000) {
+    const end = Date.now() + ms;
+    while (!check()) {
+      if (Date.now() > end) throw new Error('timed out');
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
   it('keeps everything for the host off the public server, even with a valid host token', async () => {
     const { id, token } = await runningGame('10.0.0.1');
     for (const [method, path] of [
@@ -191,8 +212,30 @@ describe('internet mode: a public and an admin server', () => {
     const { id, code, session } = await runningGame('10.0.0.2');
     expect((await call(publicUrl, `/api/games/by-code/${code}`, { ip: '10.0.0.2' })).body).toMatchObject({ id, joinable: true });
     expect(await wsOutcome(`ws://127.0.0.1:${publicPort}/ws?role=player&code=${code}&token=${session}`)).toEqual({ hello: true });
-    expect(await wsOutcome(`ws://127.0.0.1:${publicPort}/ws?role=main&code=${code}`)).toEqual({ hello: true });
     expect((await call(publicUrl, '/api/health')).body).toEqual({ ok: true });
+  });
+
+  it('shows the big screen on the public server only while the host shares it', async () => {
+    const { id, code, token } = await runningGame('10.0.0.4');
+    const publicScreen = `ws://127.0.0.1:${publicPort}/ws?role=main&code=${code}`;
+    const share = (publicDisplay: boolean) =>
+      call(adminUrl, `/api/games/${id}`, { method: 'PATCH', token, body: JSON.stringify({ settings: { publicDisplay } }) });
+
+    // Off by default: refused with its own close code; the host machine always has it.
+    expect(await closedWith(publicScreen)).toEqual({ code: 4004, message: expect.stringMatching(/not shared online/) });
+    expect(await wsOutcome(`ws://localhost:${adminPort}/ws?role=main&code=${code}`)).toEqual({ hello: true });
+
+    expect((await share(true)).status).toBe(200);
+    // Shared: it connects and stays; stopping sharing sends it away.
+    const ws = new WebSocket(publicScreen);
+    const messages: ServerMessage[] = [];
+    ws.on('message', (raw) => messages.push(JSON.parse(String(raw)) as ServerMessage));
+    const closed = new Promise<number>((resolve) => ws.on('close', (c) => resolve(c)));
+    await until(() => messages.some((m) => m.type === 'EVENT'));
+    expect(messages[0]!.type).toBe('HELLO');
+    expect((await share(false)).status).toBe(200);
+    expect(await closed).toBe(4004);
+    expect(messages.at(-1)).toMatchObject({ type: 'ERROR', fatal: true });
   });
 
   it('only answers the admin server by the host machine’s own name', async () => {

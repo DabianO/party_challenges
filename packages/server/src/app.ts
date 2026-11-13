@@ -85,10 +85,19 @@ interface Conn {
   socket: WebSocket;
   gameId: string;
   audience: SnapshotAudience;
+  /** A big screen on the public address (internet mode): allowed only while the game shares it. */
+  publicDisplay?: boolean;
 }
+
+/** Close code for a big screen on the public address of a game that does not share it. */
+export const NOT_SHARED_CLOSE = 4004;
+export const NOT_SHARED_MESSAGE = 'This big screen is not shared online. The host can share it in the game settings.';
 
 class ConnectionHub {
   private readonly byGame = new Map<string, Set<Conn>>();
+
+  /** `stillAllowed` is asked before each delivery to a public big screen (the host may stop sharing it). */
+  constructor(private readonly stillAllowed: (conn: Conn) => boolean = () => true) {}
 
   add(conn: Conn): void {
     let set = this.byGame.get(conn.gameId);
@@ -110,7 +119,18 @@ class ConnectionHub {
     if (!set) return;
     const msg = JSON.stringify({ type: 'EVENT', event } satisfies ServerMessage);
     for (const conn of set) {
-      if (matches(event.audience, conn.audience)) safeSend(conn.socket, msg);
+      if (!matches(event.audience, conn.audience)) continue;
+      if (conn.publicDisplay && !this.stillAllowed(conn)) {
+        this.remove(conn);
+        safeSend(conn.socket, JSON.stringify({ type: 'ERROR', message: NOT_SHARED_MESSAGE, fatal: true } satisfies ServerMessage));
+        try {
+          conn.socket.close(NOT_SHARED_CLOSE, 'not shared');
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+      safeSend(conn.socket, msg);
     }
   }
 
@@ -216,7 +236,13 @@ function pickOptions(body: Record<string, unknown>): Partial<InstanceOptions> {
 }
 
 export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstance; engine: Engine; hub: ConnectionHub; adminServer: Server | null }> {
-  const hub = new ConnectionHub();
+  const hub = new ConnectionHub((conn) => {
+    try {
+      return engine.getGame(conn.gameId).doc.settings.publicDisplay === true;
+    } catch {
+      return false;
+    }
+  });
   const media = new MediaService(join(config.dataDir, 'media'), config.repo, config.mediaMaxBytes);
   const engine = new Engine({
     registry: config.registry,
@@ -324,7 +350,7 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
   // ---------------------------------------------------------------------------
   // Library
   // ---------------------------------------------------------------------------
-  app.get('/api/health', async (req) => (isPublic(req) ? { ok: true } : { ok: true, modules: config.registry.size, games: engine.listGames().length }));
+  app.get('/api/health', async (req) => (isPublic(req) ? { ok: true } : { ok: true, modules: config.registry.size, games: engine.listGames().length, internet: surfaces }));
 
   app.get('/api/modules', async () => ({ modules: config.registry.info() }));
 
@@ -617,7 +643,14 @@ export async function buildApp(config: AppConfig): Promise<{ app: FastifyInstanc
       return;
     }
 
-    const conn: Conn = { socket, gameId: game.id, audience };
+    // Internet mode: a big screen on the public address only while the game shares it.
+    const publicDisplay = audience.role === 'main' && isPublic(req);
+    if (publicDisplay && !game.doc.settings.publicDisplay) {
+      safeSend(socket, JSON.stringify({ type: 'ERROR', message: NOT_SHARED_MESSAGE, fatal: true } satisfies ServerMessage));
+      socket.close(NOT_SHARED_CLOSE, 'not shared');
+      return;
+    }
+    const conn: Conn = { socket, gameId: game.id, audience, ...(publicDisplay ? { publicDisplay } : {}) };
     hub.add(conn);
     safeSend(
       socket,

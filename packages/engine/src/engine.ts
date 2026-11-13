@@ -243,6 +243,8 @@ function pickSettings(raw: unknown): Partial<GameSettings> {
   if (PREFERENCES.includes(s.evaluationPreference as EvaluationPreference)) out.evaluationPreference = s.evaluationPreference as EvaluationPreference;
   if (typeof s.judgeDeadlineSeconds === 'number') out.judgeDeadlineSeconds = s.judgeDeadlineSeconds;
   if (typeof s.maxReassignments === 'number') out.maxReassignments = s.maxReassignments;
+  if (typeof s.standingsEveryMinutes === 'number') out.standingsEveryMinutes = s.standingsEveryMinutes;
+  if (typeof s.publicDisplay === 'boolean') out.publicDisplay = s.publicDisplay;
   return out;
 }
 

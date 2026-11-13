@@ -4,14 +4,13 @@ import type { AimFieldNode } from '@challenge/contract';
 const pct = (v: number) => `${Math.min(1, Math.max(0, v)) * 100}%`;
 
 /**
- * A 16:9 field with a shared crosshair, its home base and floating targets (`aim-field`), for
+ * A 16:9 field with a shared crosshair and floating targets (`aim-field`), for
  * the big screen. The crosshair glides between the positions the server sends; targets bob a
  * little on their own; a burst plays once where a target was hit, a flash at every shot.
  */
 export function AimField({ node }: { node: AimFieldNode }) {
   return (
     <div className="aim-field" aria-hidden="true">
-      <div className="aim-home" style={{ left: pct(node.home.x), top: pct(node.home.y), width: pct(node.home.size) }} />
       {node.targets.map((t, i) => (
         <div key={t.id} className="aim-target" style={{ left: pct(t.x), top: pct(t.y), width: pct(t.size), '--target-color': t.color, '--float-delay': `${-i * 1.3}s` } as CSSProperties}>
           <div className="balloon" />

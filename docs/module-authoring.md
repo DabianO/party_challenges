@@ -198,8 +198,8 @@ evaluated → scored.
    (`group-message`: the writer's name in their own colour).
    **`displayOverlay(state, ctx)`** (optional) returns a layer drawn over the whole big screen
    while the instance is open (a 16:9 box, see-through and not clickable, hidden during the
-   results presentation), or null. `ui.aimField(crosshair, home, targets, bursts)` draws a
-   crosshair that glides between positions, its home base, targets that float a little
+   results presentation), or null. `ui.aimField(crosshair, targets, bursts, shot)` draws a
+   crosshair that glides between positions, targets that float a little
    (`{ id, x, y, size, color }`, positions 0..1) and a pop with a short text where one was hit
    (a new burst `id` plays it once), plus an optional `shot` that flashes once per new `id`. Steer it with `ui.dPad(action, { fireLabel, disabled })`
    on the phones: arrow presses arrive in batches as `{ [action]: { move: [dx, dy] } }`,

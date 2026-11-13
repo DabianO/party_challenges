@@ -9,8 +9,11 @@ export type SocketParams =
 export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface FatalInfo {
-  /** 4003 = authentication failed / game gone; 4001 = player removed by the host. */
-  kind: 'unauthorized' | 'removed';
+  /**
+   * 4003 = authentication failed / game gone; 4001 = player removed by the host;
+   * 4004 = a big screen on the public address of a game that does not share it.
+   */
+  kind: 'unauthorized' | 'removed' | 'unshared';
   message: string;
 }
 
@@ -188,6 +191,11 @@ export function useGameSocket(params: SocketParams | null): GameSocket {
         if (disposed) return;
         if (ev.code === 4003) {
           setFatal({ kind: 'unauthorized', message: lastFatalMessage ?? ev.reason ?? 'Not authorized' });
+          setStatus('closed');
+          return;
+        }
+        if (ev.code === 4004) {
+          setFatal({ kind: 'unshared', message: lastFatalMessage ?? 'This big screen is not shared online' });
           setStatus('closed');
           return;
         }

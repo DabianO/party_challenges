@@ -124,6 +124,9 @@ export const api = {
     request<ImportSetupResponse>('/api/games/import', { body: hostPassword ? { setup, hostPassword } : { setup } }),
 
   /** Every game stored on the server, with host tokens — answered only for a browser on the host machine. */
+  /** On the host machine: whether the party is on the internet (public and admin servers). */
+  internetMode: () => request<{ internet?: boolean }>('/api/health').then((r) => r.internet === true),
+
   localGames: () => request<{ games: LocalGameInfo[] }>('/api/local/games').then((r) => r.games),
 
   getGame: (id: string, token: string) => request<{ snapshot: GameSnapshot }>(`/api/games/${id}`, { token }).then((r) => r.snapshot),

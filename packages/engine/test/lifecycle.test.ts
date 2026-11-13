@@ -474,6 +474,51 @@ describe('board lifecycle', () => {
     expect(game.performHostAction({ action: 'publish-standings' }).message).toMatch(/no changes/);
   });
 
+  it('updates the big screen by itself every so many minutes while the game runs', () => {
+    const { engine, events, time } = setup();
+    const { runtime: game } = engine.createGame({ name: 'Race' });
+    expect(game.doc.settings.standingsEveryMinutes).toBe(15);
+    const a = game.addChallenge('caption-this', CAPTION, { evaluationMode: 'host' });
+    game.performHostAction({ action: 'open-lobby' });
+    const ada = game.join('Ada').player;
+    game.connect({ role: 'host' });
+    game.connect({ role: 'main' });
+    game.performHostAction({ action: 'start-game' });
+    game.startAttempt(ada.id, a.id);
+    game.submit(ada.id, a.id, { caption: 'Hi' }, true);
+    const item = lastSnapshot(events, 'host').hostQueue[0]!;
+    game.performHostAction({ action: 'decide', assignmentId: item.assignmentId, decision: 'approve', points: 7 });
+
+    time.advance(14 * 60_000);
+    expect(lastSnapshot(events, 'main').standings).toBeNull();
+    time.advance(60_000); // 15 minutes after the start
+    const first = lastSnapshot(events, 'main').standings!;
+    expect(first.entries.map((e) => [e.displayName, e.total])).toEqual([['Ada', 7]]);
+
+    // A copy by hand restarts the 15 minutes.
+    time.advance(10 * 60_000);
+    game.performHostAction({ action: 'publish-standings' });
+    const byHand = lastSnapshot(events, 'main').standings!.publishedAt;
+    time.advance(14 * 60_000);
+    expect(lastSnapshot(events, 'main').standings!.publishedAt).toBe(byHand);
+    time.advance(60_000);
+    expect(lastSnapshot(events, 'main').standings!.publishedAt).toBe(byHand + 15 * 60_000);
+
+    // Not while paused (it catches up on resume), and not at all when switched off.
+    game.performHostAction({ action: 'pause' });
+    time.advance(30 * 60_000);
+    const paused = lastSnapshot(events, 'main').standings!.publishedAt;
+    expect(paused).toBe(byHand + 15 * 60_000);
+    game.performHostAction({ action: 'resume' });
+    time.advance(0);
+    expect(lastSnapshot(events, 'main').standings!.publishedAt).toBeGreaterThan(paused);
+    game.updateGame({ settings: { standingsEveryMinutes: 0 } });
+    const off = lastSnapshot(events, 'main').standings!.publishedAt;
+    time.advance(120 * 60_000);
+    expect(lastSnapshot(events, 'main').standings!.publishedAt).toBe(off);
+    expect(() => game.updateGame({ settings: { standingsEveryMinutes: 2.5 } })).toThrow(/0 \(off\) to 240/);
+  });
+
   it('takes live actions without submissions, throttles their snapshots and shows the panel on the main display only', () => {
     const { engine, events, time } = setup();
     const { runtime: game } = engine.createGame({ name: 'Blobs' });

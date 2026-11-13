@@ -10,7 +10,8 @@ import { AttentionPanel, attentionCount } from './AttentionPanel';
 import { ChallengeControls, type Act } from './ChallengeControls';
 import { EvaluationsPanel } from './EvaluationsPanel';
 import type { HostCtx } from './hostApi';
-import { api } from '../../lib/api';
+import { api, errorMessage } from '../../lib/api';
+import { displayUrlOf, useInternetMode } from '../../lib/display';
 import { PlayerList } from './PlayerList';
 import { StartOverButton } from './StartOverButton';
 import { relativeTime, useNow } from '../../lib/time';
@@ -169,6 +170,7 @@ export function RunTab({ ctx }: { ctx: HostCtx }) {
               <span className="muted small">
                 {running && !game.settings.allowLateJoin ? 'Late joining is off — new guests cannot join.' : 'Guests scan the QR or type the code on the start page.'}
               </span>
+              <DisplayLink ctx={ctx} />
             </div>
           </div>
         )}
@@ -421,11 +423,78 @@ function SpotlightPanel({ ctx, busy, act }: { ctx: HostCtx; busy: boolean; act: 
   );
 }
 
-/** The big screen only shows the race as of the last update, so the host decides when it changes. */
+/**
+ * The big screen's own link, to watch it elsewhere. On the internet it works only while the
+ * game shares it (setting `publicDisplay`), switched here or in the game settings.
+ */
+function DisplayLink({ ctx }: { ctx: HostCtx }) {
+  const { game, joinUrl } = ctx.snapshot;
+  const internet = useInternetMode();
+  const [busy, setBusy] = useState(false);
+  if (internet === null) return null;
+  const url = displayUrlOf(joinUrl, game.code);
+  const shared = !internet || game.settings.publicDisplay;
+  const share = async (on: boolean) => {
+    setBusy(true);
+    try {
+      await api.patchGame(ctx.gameId, ctx.token, { settings: { ...game.settings, publicDisplay: on } });
+      ctx.toast(on ? 'The big screen is shared online' : 'The big screen is no longer shared online', 'success');
+    } catch (err) {
+      ctx.toast(errorMessage(err), 'danger');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      ctx.toast('Big screen link copied', 'success');
+    } catch {
+      window.prompt('Copy the big screen link', url);
+    }
+  };
+  return (
+    <span className="display-link small">
+      {shared ? (
+        <>
+          <span className="muted">📺 Big screen: </span>
+          <a className="link" href={url} target="_blank" rel="noopener">
+            {url}
+          </a>{' '}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copy()}>
+            Copy
+          </button>
+          {internet && (
+            <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void share(false)}>
+              Stop sharing
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="muted">📺 The big screen is only on this computer. </span>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void share(true)}>
+            Share it online
+          </button>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** The big screen only shows the race as of the last update: by hand, or by itself every so many minutes. */
 function BigScreenPanel({ ctx, busy, onUpdate }: { ctx: HostCtx; busy: boolean; onUpdate: () => void }) {
-  const { standings, standingsFeed } = ctx.snapshot;
+  const { standings, standingsFeed, game } = ctx.snapshot;
   const now = useNow(5000) + ctx.clockOffset;
   const latest = standings ? standingsFeed.filter((f) => f.at === standings.publishedAt) : [];
+  const every = game.settings.standingsEveryMinutes;
+  const nextAt = every > 0 ? (standings?.publishedAt ?? game.startedAt ?? now) + every * 60_000 : null;
+  const auto =
+    nextAt === null
+      ? 'Updates only when you press the button.'
+      : game.paused
+        ? `Updates by itself every ${every} min (not while paused).`
+        : `Updates by itself every ${every} min, next in ${Math.max(1, Math.ceil((nextAt - now) / 60_000))} min.`;
   return (
     <div className="screen-panel">
       <span className="grow stack gap-xs">
@@ -436,7 +505,7 @@ function BigScreenPanel({ ctx, busy, onUpdate }: { ctx: HostCtx; busy: boolean; 
               ? `Last update: ${latest.map((f) => f.text).join(' · ')}.`
               : 'Last update: no changes in the ranking.'
             : 'Press update to put the current standings and graph on the big screen.'}{' '}
-          Phones are not affected.
+          {auto} Phones are not affected.
         </span>
       </span>
       <button type="button" className="btn btn-primary" disabled={busy} onClick={onUpdate}>
